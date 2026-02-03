@@ -1,6 +1,23 @@
-# Xiaohongshu (RedNote) Content Scraping API
+# Vibe Route Planner 🗺️
 
-A universal Xiaohongshu note scraping tool that can search for any keyword and extract note titles and body content.
+**An intelligent travel route planning application** that helps users discover personalized travel destinations and create optimized itineraries based on their preferences.
+
+## 🚧 Project Status: Under Construction
+
+Currently implemented:
+- ✅ **Phase 1: Data Scraping** - Xiaohongshu (RedNote) content extraction for travel research
+
+Coming soon:
+- 🔄 User preference input system
+- 🔄 Route optimization algorithm
+- 🔄 Interactive map generation
+- 🔄 Personalized itinerary output
+
+---
+
+## Current Feature: Xiaohongshu Content Scraper
+
+A data collection module that searches Xiaohongshu for travel-related content and extracts note titles and body content for route planning research.
 
 ## 📋 Table of Contents
 
@@ -227,9 +244,18 @@ python3 xiaohongshu_api.py "iPhone 16 Review" 10
 python3 xiaohongshu_api.py "Skincare Recommendations" 15
 ```
 
+## 🙏 Acknowledgments
+
+This project's data scraping module is built upon the excellent work by **[@xpzouying](https://github.com/xpzouying)**:
+- **Original Repository**: [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp)
+- **Author**: xpzouying
+- **License**: As specified in the original repository
+
+Special thanks for providing the foundation for the Xiaohongshu MCP server integration.
+
 ## 🔗 Related Resources
 
-- Original GitHub repository: https://github.com/xpzouying/xiaohongshu-mcp
+- Xiaohongshu MCP Server (original): https://github.com/xpzouying/xiaohongshu-mcp
 - MCP protocol documentation: Model Context Protocol
 
 ## ⚠️ Important Notes

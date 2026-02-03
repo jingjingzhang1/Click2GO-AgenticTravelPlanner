@@ -1,26 +1,42 @@
-# Project Organization Summary
+# Vibe Route Planner - Project Summary
 
-## ✅ Completed
+## 📍 Project Goal
 
-### 1. File Cleanup
+**Building an intelligent travel route planning application** that:
+1. Scrapes travel content from Xiaohongshu (RedNote)
+2. Analyzes user preferences and constraints
+3. Generates personalized, optimized travel itineraries
+4. Creates visual route maps and detailed plans
+
+## 🚧 Current Status: Phase 1 Complete
+
+### ✅ Phase 1: Data Scraping (Completed)
+
+#### 1. File Cleanup
 - ✅ Deleted all temporary test files
 - ✅ Removed duplicate scripts
 - ✅ Kept only core code and sample outputs
 
-### 2. Created Universal API
+#### 2. Created Universal Scraping API
 - ✅ `xiaohongshu_api.py` - Supports searching for any keyword
-- ✅ Extracts only title and body text (no author info, no like counts)
+- ✅ Extracts title and body text for travel research
 - ✅ Auto-saves results to file
 
-### 3. Simplified Workflow
+#### 3. Simplified Workflow
 - ✅ `start.sh` - One-click server startup
 - ✅ `login.sh` - Login check and QR code generation
 - ✅ `stop.sh` - Stop server
 
-### 4. Complete Documentation
+#### 4. Complete Documentation
 - ✅ `README.md` - Complete usage documentation
 - ✅ `QUICKSTART.md` - Quick start guide
 - ✅ `PROJECT_STRUCTURE.md` - Project structure description
+
+### 🔄 Next Phases (Under Development)
+
+- **Phase 2**: User preference input system
+- **Phase 3**: Route optimization algorithm with Maps API integration
+- **Phase 4**: Visual output generation (maps, itineraries, PDFs)
 
 ## 📁 Final File Structure
 
@@ -115,6 +131,10 @@ No author info, no like counts, no comment counts.
 - Quick start: [QUICKSTART.md](QUICKSTART.md)
 - Project structure: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
 
+## 🙏 Acknowledgments
+
+The data scraping module is built upon [@xpzouying](https://github.com/xpzouying)'s [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp) project.
+
 ---
 
-**The project is now fully organized and ready to use!** 🎉
+**Phase 1 complete! Building the future of personalized travel planning.** 🎉

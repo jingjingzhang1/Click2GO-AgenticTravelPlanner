@@ -1,7 +1,10 @@
 # Project Structure
 
+## Overview
+Vibe Route Planner - An intelligent travel planning application (currently in Phase 1: Data Collection)
+
 ```
-rednote-mcp/
+vibe-route-planner/
 ├── README.md                      # Complete documentation
 ├── QUICKSTART.md                  # Quick start guide
 ├── xiaohongshu_api.py            # Core API (main code)
