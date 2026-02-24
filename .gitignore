@@ -22,6 +22,8 @@ cookies.json
 *.log
 qrcode.png
 docker/qrcode.png
+outputs/
+click2go.db
 
 # ===== Python =====
 __pycache__/
