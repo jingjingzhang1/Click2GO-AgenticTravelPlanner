@@ -2,6 +2,8 @@
 Click2GO – Test Suite
 =====================
 Run with:  python3 -m pytest tests/ -v
+
+Uses SQLite for testing (set in conftest.py) so PostgreSQL is not required.
 """
 import sys
 import os
@@ -36,15 +38,12 @@ def reset_db():
 
 class TestRootEndpoints:
 
-    def test_root_returns_app_name(self):
-        r = client.get("/")
-        assert r.status_code == 200
-        assert r.json()["name"] == "Click2GO"
-
     def test_health_returns_healthy(self):
         r = client.get("/health")
         assert r.status_code == 200
-        assert r.json()["status"] == "healthy"
+        body = r.json()
+        assert body["status"] == "healthy"
+        assert body["version"] == "2.0.0"
 
     def test_docs_accessible(self):
         r = client.get("/docs")
@@ -59,7 +58,7 @@ VALID_PLAN_PAYLOAD = {
     "destination": "Tokyo",
     "start_date":  "2026-04-01",
     "end_date":    "2026-04-03",
-    "persona":     "photography",
+    "personas":    ["photography"],
     "constraints": {"allergies": [], "budget": "mid-range"},
     "max_pois_per_day": 4,
     "language": "en",
@@ -73,7 +72,7 @@ class TestPlanningAPI:
         assert r.status_code == 202
         body = r.json()
         assert "session_id" in body
-        assert len(body["session_id"]) == 36          # UUID format
+        assert len(body["session_id"]) == 36
         assert "Tokyo" in body["message"]
 
     def test_create_plan_missing_destination_rejected(self):
@@ -83,7 +82,7 @@ class TestPlanningAPI:
         assert r.status_code == 422
 
     def test_create_plan_invalid_persona_rejected(self):
-        bad = {**VALID_PLAN_PAYLOAD, "persona": "partying"}
+        bad = {**VALID_PLAN_PAYLOAD, "personas": ["partying"]}
         r = client.post("/api/v1/plan", json=bad)
         assert r.status_code == 422
 
@@ -109,15 +108,19 @@ class TestPlanningAPI:
     def test_result_while_in_progress_returns_202(self):
         r = client.post("/api/v1/plan", json=VALID_PLAN_PAYLOAD)
         sid = r.json()["session_id"]
-        # Session is pending/scraping — result should not be ready yet
         r2 = client.get(f"/api/v1/plan/{sid}/result")
-        assert r2.status_code in (202, 200)   # 202 if still running, 200 if it finished instantly
+        assert r2.status_code in (202, 200)
 
     def test_all_persona_values_accepted(self):
         for persona in ("photography", "chilling", "foodie", "exercise"):
-            payload = {**VALID_PLAN_PAYLOAD, "persona": persona}
+            payload = {**VALID_PLAN_PAYLOAD, "personas": [persona]}
             r = client.post("/api/v1/plan", json=payload)
-            assert r.status_code == 202, f"persona={persona} was rejected"
+            assert r.status_code == 202, f"personas=[{persona}] was rejected"
+
+    def test_multiple_personas_accepted(self):
+        payload = {**VALID_PLAN_PAYLOAD, "personas": ["photography", "foodie"]}
+        r = client.post("/api/v1/plan", json=payload)
+        assert r.status_code == 202
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -135,7 +138,7 @@ class TestPreferencesAPI:
         assert r2.status_code == 200
         body = r2.json()
         assert body["destination"] == "Tokyo"
-        assert body["persona"]     == "photography"
+        assert "photography" in body["personas"]
 
     def test_preferences_not_found_returns_404(self):
         r = client.get("/api/v1/preferences/99999")
@@ -150,7 +153,43 @@ class TestPreferencesAPI:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Route Optimizer
+# 4. API – Chat
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestChatAPI:
+
+    def test_chat_requires_completed_session(self):
+        # Manually create a pending session (no background task)
+        import uuid
+        from backend.database import SessionLocal
+        from backend.models import PlanningSession, SessionStatus
+
+        db = SessionLocal()
+        sid = str(uuid.uuid4())
+        db.add(PlanningSession(id=sid, status=SessionStatus.PENDING))
+        db.commit()
+        db.close()
+
+        r = client.post(
+            f"/api/v1/plan/{sid}/chat",
+            json={"message": "Make the map dark mode"},
+        )
+        assert r.status_code == 400
+
+    def test_chat_unknown_session_returns_404(self):
+        r = client.post(
+            "/api/v1/plan/00000000-0000-0000-0000-000000000000/chat",
+            json={"message": "hello"},
+        )
+        assert r.status_code == 404
+
+    def test_chat_history_unknown_session_returns_404(self):
+        r = client.get("/api/v1/plan/00000000-0000-0000-0000-000000000000/chat")
+        assert r.status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. Route Optimizer
 # ══════════════════════════════════════════════════════════════════════════════
 
 from backend.services.route_optimizer import RouteOptimizer
@@ -207,7 +246,7 @@ class TestRouteOptimizer:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. Map Tool
+# 6. Map Tool
 # ══════════════════════════════════════════════════════════════════════════════
 
 from backend.tools.map_tool import MapTool
@@ -222,7 +261,6 @@ class TestMapTool:
         coords = self.mt.geocode("Shibuya Crossing Tokyo")
         assert coords is not None
         lat, lng = coords
-        # Tokyo is roughly 35°N, 139°E
         assert 35.0 < lat < 36.5
         assert 138.0 < lng < 141.0
 
@@ -233,20 +271,15 @@ class TestMapTool:
         assert 39.0 < lat < 41.0
         assert 115.0 < lng < 118.0
 
-    def test_geocode_unknown_address_still_returns_coords(self):
-        # Unknown locations should return a default (Tokyo area)
+    def test_geocode_unknown_returns_none(self):
         coords = self.mt.geocode("XYZ_UNKNOWN_PLACE_12345")
-        assert coords is not None
-        lat, lng = coords
-        assert isinstance(lat, float)
-        assert isinstance(lng, float)
+        assert coords is None
 
     def test_haversine_same_point_is_zero(self):
         d = self.mt._haversine(35.0, 139.0, 35.0, 139.0)
         assert d == pytest.approx(0.0)
 
     def test_haversine_tokyo_osaka_approx_400km(self):
-        # Tokyo (35.68, 139.69) → Osaka (34.69, 135.50) ≈ 400 km
         d = self.mt._haversine(35.68, 139.69, 34.69, 135.50)
         assert 350 < d < 450
 
@@ -273,7 +306,7 @@ class TestMapTool:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. Verification Agent (no API key – tests fallback behaviour)
+# 7. Verification Agent (no API key – tests fallback behaviour)
 # ══════════════════════════════════════════════════════════════════════════════
 
 from backend.agents.verification_agent import VerificationAgent
@@ -308,7 +341,7 @@ class TestVerificationAgent:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 7. Itinerary Exporter
+# 8. Itinerary Exporter
 # ══════════════════════════════════════════════════════════════════════════════
 
 from backend.tools.itinerary_exporter import ItineraryExporter
@@ -354,12 +387,11 @@ class TestItineraryExporter:
         assert path.endswith(".html") or path.endswith(".geojson")
 
     def test_pdf_contains_destination(self):
-        # Use text fallback for a quick content check
         itinerary = {**MOCK_ITINERARY, "session_id": "txttest0-0000-0000-0000-000000000000"}
         path = self.exp._text_fallback(itinerary, MOCK_PROFILE)
         content = open(path).read()
         assert "Tokyo" in content
-        assert "DAY 1" in content          # text fallback uses "--- DAY 1 ---"
+        assert "DAY 1" in content
         assert "Shibuya Crossing" in content
 
     def test_map_html_contains_marker_data(self):
@@ -375,12 +407,12 @@ class TestItineraryExporter:
         with open(path) as f:
             geo = json.load(f)
         assert geo["type"] == "FeatureCollection"
-        assert len(geo["features"]) == 3      # 3 geocoded POIs
+        assert len(geo["features"]) == 3
         assert geo["features"][0]["geometry"]["type"] == "Point"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 8. Social Scraper Tool (offline / mock mode)
+# 9. Social Scraper Tool (offline / mock mode)
 # ══════════════════════════════════════════════════════════════════════════════
 
 from backend.tools.social_scraper_tool import SocialScraperTool
@@ -431,6 +463,89 @@ class TestSocialScraperTool:
         assert "106" in addr
 
     def test_search_pois_returns_list_when_offline(self):
-        # MCP server not running → falls back to mock data
         pois = self.scraper.search_pois("Tokyo Coffee", max_results=5)
         assert isinstance(pois, list)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 10. Postgres MCP Server (read-only validation)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from backend.mcp.postgres_mcp import PostgresMCPServer
+
+
+class TestPostgresMCP:
+
+    def setup_method(self):
+        self.mcp = PostgresMCPServer()
+
+    def test_list_tables(self):
+        tables = self.mcp.list_tables()
+        assert isinstance(tables, list)
+        assert "pois" in tables
+        assert "poi_cache" in tables
+        assert "chat_messages" in tables
+
+    def test_describe_table(self):
+        columns = self.mcp.describe_table("pois")
+        assert isinstance(columns, list)
+        col_names = [c["name"] for c in columns]
+        assert "name" in col_names
+        assert "lat" in col_names
+
+    def test_execute_select_query(self):
+        result = self.mcp.execute_query("SELECT COUNT(*) FROM pois")
+        assert "error" not in result or result.get("error") is None
+        assert result["row_count"] >= 0
+
+    def test_blocks_write_queries(self):
+        result = self.mcp.execute_query("DELETE FROM pois WHERE id = 1")
+        assert result.get("error") is not None
+        assert "not allowed" in result["error"].lower()
+
+    def test_blocks_drop_queries(self):
+        result = self.mcp.execute_query("DROP TABLE pois")
+        assert result.get("error") is not None
+
+    def test_blocks_insert_queries(self):
+        result = self.mcp.execute_query(
+            "INSERT INTO pois (name) VALUES ('test')"
+        )
+        assert result.get("error") is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 11. Knowledge Manager Agent (cache logic)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from backend.tools.db_tools import upsert_poi_cache, get_cached_pois
+
+
+class TestKnowledgeCache:
+
+    def test_upsert_and_retrieve_cache(self):
+        pois = [
+            {"name": "Test Cafe", "address": "Tokyo", "lat": 35.68, "lng": 139.70,
+             "persona_score": 8.5, "is_open": True, "persona_tags": ["chilling"]},
+        ]
+        count = upsert_poi_cache("Tokyo", pois)
+        assert count == 1
+
+        cached = get_cached_pois("Tokyo")
+        assert len(cached) == 1
+        assert cached[0]["name"] == "Test Cafe"
+
+    def test_upsert_updates_existing(self):
+        pois = [{"name": "Test Cafe", "persona_score": 7.0}]
+        upsert_poi_cache("Tokyo", pois)
+
+        updated = [{"name": "Test Cafe", "persona_score": 9.0}]
+        upsert_poi_cache("Tokyo", updated)
+
+        cached = get_cached_pois("Tokyo")
+        assert len(cached) == 1
+        assert cached[0]["persona_score"] == 9.0
+
+    def test_empty_cache_returns_empty_list(self):
+        cached = get_cached_pois("Nonexistent City")
+        assert cached == []

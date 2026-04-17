@@ -17,24 +17,25 @@ router = APIRouter()
 @router.post("/preferences", status_code=201)
 async def save_preferences(request: PlanningRequest, db: Session = Depends(get_db)):
     """Persist a traveller preference profile for reuse across sessions."""
+    personas_str = ",".join(p.value for p in request.personas)
     profile = UserProfile(
-        destination = request.destination,
-        start_date  = request.start_date,
-        end_date    = request.end_date,
-        persona     = request.persona.value,
-        allergies   = request.constraints.allergies,
-        budget      = request.constraints.budget,
-        language    = request.language,
+        destination=request.destination,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        personas=personas_str,
+        allergies=request.constraints.allergies,
+        budget=request.constraints.budget,
+        language=request.language,
     )
     db.add(profile)
     db.commit()
     db.refresh(profile)
 
     return {
-        "id":          profile.id,
+        "id": profile.id,
         "destination": profile.destination,
-        "persona":     profile.persona,
-        "message":     "Preferences saved successfully",
+        "personas": personas_str,
+        "message": "Preferences saved successfully",
     }
 
 
@@ -46,13 +47,13 @@ async def get_preferences(profile_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Profile not found")
 
     return {
-        "id":          profile.id,
+        "id": profile.id,
         "destination": profile.destination,
-        "start_date":  profile.start_date,
-        "end_date":    profile.end_date,
-        "persona":     profile.persona,
-        "allergies":   profile.allergies,
-        "budget":      profile.budget,
-        "language":    profile.language,
-        "created_at":  profile.created_at.isoformat() if profile.created_at else None,
+        "start_date": profile.start_date,
+        "end_date": profile.end_date,
+        "personas": profile.personas,
+        "allergies": profile.allergies,
+        "budget": profile.budget,
+        "language": profile.language,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
     }

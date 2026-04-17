@@ -23,7 +23,10 @@ cookies.json
 qrcode.png
 docker/qrcode.png
 outputs/
+# click2go.db is the user's local copy (created from seed_database.sqlite)
+# seed_database.sqlite IS tracked in Git — it's the master POI data
 click2go.db
+test_click2go.db
 
 # ===== Python =====
 __pycache__/

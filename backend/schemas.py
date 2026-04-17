@@ -13,7 +13,7 @@ class PersonaType(str, Enum):
 
 class UserConstraints(BaseModel):
     allergies: List[str] = []
-    budget: Optional[str] = None      # "budget" | "mid-range" | "luxury"
+    budget: Optional[str] = None
     accessibility: Optional[str] = None
 
 
@@ -81,3 +81,18 @@ class PlanningStatusResponse(BaseModel):
     total_pois_included: int = 0
     error_message: Optional[str] = None
     result: Optional[PlanningSessionResponse] = None
+
+
+# ── Chat schemas ─────────────────────────────────────────────────────────────
+
+class ChatMessageRequest(BaseModel):
+    message: str = Field(..., description="User message to the Design Agent")
+
+
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    map_updated: bool = False
+    pdf_updated: bool = False
+    map_url: Optional[str] = None
+    pdf_url: Optional[str] = None

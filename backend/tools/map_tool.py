@@ -162,15 +162,31 @@ class MapTool:
         """
         Return approximate city-centre coords + small jitter.
         Enables route-optimiser testing without a live Maps API.
+        Uses fuzzy matching so typos like "Vancuvour" still resolve.
         """
         addr_lower = address.lower()
         for city, (lat, lng) in _CITY_COORDS.items():
-            if city.lower() in addr_lower:
+            cl = city.lower()
+            # Exact substring match OR either string contains the other
+            if cl in addr_lower or addr_lower in cl:
                 offset = 0.015
                 return (
                     lat + random.uniform(-offset, offset),
                     lng + random.uniform(-offset, offset),
                 )
+
+        # Fuzzy fallback: check if >60% of characters overlap
+        for city, (lat, lng) in _CITY_COORDS.items():
+            cl = city.lower()
+            if len(cl) >= 4 and len(addr_lower) >= 4:
+                common = sum(1 for c in cl if c in addr_lower)
+                if common / max(len(cl), len(addr_lower)) > 0.6:
+                    offset = 0.015
+                    return (
+                        lat + random.uniform(-offset, offset),
+                        lng + random.uniform(-offset, offset),
+                    )
+
         # Unknown location — return None so the orchestrator skips geocoding
         # rather than silently placing the POI in the wrong city.
         return None

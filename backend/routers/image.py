@@ -40,12 +40,12 @@ async def generate_image(
     db: Session = Depends(get_db),
 ):
     """
-    Generate a cartoon travel poster for a completed planning session.
-    Fetches the image from Pollinations AI and serves it from /outputs/
-    so the browser loads it from localhost (no external URL issues).
+    Generate a stylized travel poster for a completed planning session.
+    Uses Replicate FLUX Schnell (primary) or Pollinations AI (fallback).
     """
-    # ── Validate session ──────────────────────────────────────────────────────
-    session = db.query(PlanningSession).filter(PlanningSession.id == session_id).first()
+    session = db.query(PlanningSession).filter(
+        PlanningSession.id == session_id
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Planning session not found")
     if session.status != SessionStatus.COMPLETED:
@@ -54,10 +54,11 @@ async def generate_image(
             detail=f"Session is not completed yet (status: {session.status})",
         )
 
-    # ── Fetch profile & itinerary ─────────────────────────────────────────────
-    profile = db.query(UserProfile).filter(UserProfile.id == session.user_profile_id).first()
+    profile = db.query(UserProfile).filter(
+        UserProfile.id == session.user_profile_id
+    ).first()
     destination = profile.destination if profile else "Unknown Destination"
-    personas    = [p.strip() for p in (profile.persona or "travel").split(",")]
+    personas = [p.strip() for p in (profile.personas or "travel").split(",")]
 
     pois = (
         db.query(POI)
@@ -73,53 +74,50 @@ async def generate_image(
 
     itinerary_data = {
         "destination": destination,
-        "personas":    personas,
+        "personas": personas,
         "days": [
             {"day_number": dn, "pois": names}
             for dn, names in sorted(days_map.items())
         ],
     }
 
-    # ── Build Pollinations URL ────────────────────────────────────────────────
     result = generate_travel_poster(
-        language       = body.language,
-        itinerary_data = itinerary_data,
+        language=body.language,
+        itinerary_data=itinerary_data,
     )
 
     if not result.get("success") or not result.get("image_url"):
         return ImageResponse(
-            session_id  = session_id,
-            language    = body.language,
-            prompt_used = result.get("prompt_used", ""),
-            error       = result.get("error", "Failed to build image URL"),
-            success     = False,
+            session_id=session_id,
+            language=body.language,
+            prompt_used=result.get("prompt_used", ""),
+            error=result.get("error", "Failed to build image URL"),
+            success=False,
         )
 
-    pollinations_url = result["image_url"]
+    image_url = result["image_url"]
 
-    # ── Fetch image from Pollinations and save locally ────────────────────────
-    short_id  = session_id[:8]
-    lang_tag  = body.language
-    filename  = f"poster_{short_id}_{lang_tag}.jpg"
+    # Try to cache the image locally
+    short_id = session_id[:8]
+    filename = f"poster_{short_id}_{body.language}.jpg"
     save_path = os.path.join("outputs", filename)
 
     try:
-        resp = _requests.get(pollinations_url, timeout=60)
+        resp = _requests.get(image_url, timeout=60)
         resp.raise_for_status()
         os.makedirs("outputs", exist_ok=True)
         with open(save_path, "wb") as f:
             f.write(resp.content)
         local_url = f"/outputs/{filename}"
     except Exception as exc:
-        # Fall back to returning the direct Pollinations URL
-        local_url = pollinations_url
+        local_url = image_url
         result["error"] = f"Could not cache image locally ({exc}); using direct URL."
 
     return ImageResponse(
-        session_id  = session_id,
-        language    = body.language,
-        image_url   = local_url,
-        prompt_used = result.get("prompt_used", ""),
-        error       = result.get("error"),
-        success     = True,
+        session_id=session_id,
+        language=body.language,
+        image_url=local_url,
+        prompt_used=result.get("prompt_used", ""),
+        error=result.get("error"),
+        success=True,
     )

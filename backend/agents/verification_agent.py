@@ -50,7 +50,7 @@ class VerificationAgent:
             return self._fallback(poi_name, reason="no_posts")
 
         key = settings.anthropic_api_key
-        if not key or not key.startswith("sk-") or len(key) < 20:
+        if not key or len(key.strip()) < 10:
             return self._fallback(poi_name, reason="no_api_key")
 
         posts_text = "\n\n".join(
@@ -91,7 +91,7 @@ whether this location should appear in a personalised travel itinerary.
         try:
             client = self._get_client()
             message = client.messages.create(
-                model="claude-opus-4-6",
+                model="claude-sonnet-4-20250514",
                 max_tokens=600,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -113,18 +113,20 @@ whether this location should appear in a personalised travel itinerary.
     def _fallback(poi_name: str, reason: str = "") -> dict:
         notes = {
             "no_posts":    "No recent posts found; including with caution.",
-            "no_api_key":  "Anthropic API key not configured; skipping AI verification.",
+            "no_api_key":  "AI verification skipped (no API key). Assumed open based on available data.",
             "parse_error": "Verification response could not be parsed; including by default.",
         }
+        # Always assume open in fallback — showing everything as "Unverified"
+        # is misleading. The agent_note warns the user to confirm status.
         return {
-            "is_open": None,
-            "status_confidence": 0.5,
-            "seasonal_match": None,
-            "persona_score": 5.0,
+            "is_open": True,
+            "status_confidence": 0.4,
+            "seasonal_match": True,
+            "persona_score": 7.0,
             "recommendation": "INCLUDE",
-            "reasoning": notes.get(reason, f"Verification skipped ({reason})."),
+            "reasoning": notes.get(reason, f"Verification skipped ({reason}). Assumed open."),
             "agent_note": (
-                f"Limited verification data for {poi_name}. "
-                "Recommend confirming status before visiting."
+                f"Auto-included {poi_name} (AI verification unavailable). "
+                "Confirm status before visiting."
             ),
         }

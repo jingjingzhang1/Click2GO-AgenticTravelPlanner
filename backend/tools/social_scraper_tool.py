@@ -212,6 +212,9 @@ class SocialScraperTool:
 
     @staticmethod
     def _mock_pois(keyword: str, n: int) -> List[Dict]:
+        import random as _rnd
+        from ..tools.map_tool import _CITY_COORDS
+
         # Detect persona from keyword suffixes before stripping them
         persona = "chilling"  # default
         if any(k in keyword for k in ["拍照", "摄影", "photography"]):
@@ -231,6 +234,15 @@ class SocialScraperTool:
             dest = dest.split(suffix)[0]
         dest = dest.strip()
 
+        # Resolve city centre coords for mock lat/lng (fuzzy match)
+        base_lat, base_lng = 35.6762, 139.6503  # default Tokyo
+        dest_lower = dest.lower()
+        for city, (clat, clng) in _CITY_COORDS.items():
+            # Fuzzy: check if either string contains the other
+            if city.lower() in dest_lower or dest_lower in city.lower():
+                base_lat, base_lng = clat, clng
+                break
+
         templates = SocialScraperTool._PERSONA_TEMPLATES.get(
             persona, SocialScraperTool._PERSONA_TEMPLATES["chilling"]
         )
@@ -241,8 +253,11 @@ class SocialScraperTool:
                 "address":     f"{dest}",
                 "raw_content": tpl[1],
                 "persona_score": tpl[2],
+                "category":    persona,
                 "source_url":  "",
                 "likes":       max(10, 200 - i * 15),
+                "lat":         base_lat + _rnd.uniform(-0.03, 0.03),
+                "lng":         base_lng + _rnd.uniform(-0.03, 0.03),
             }
             for i, tpl in enumerate(templates[:n])
         ]
