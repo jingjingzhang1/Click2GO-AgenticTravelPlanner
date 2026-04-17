@@ -52,8 +52,8 @@ class DesignAgent:
 
     def _get_client(self):
         if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            from openai import OpenAI
+            self._client = OpenAI(api_key=settings.openai_api_key)
         return self._client
 
     # ── Initial generation (called by supervisor) ────────────────────────
@@ -166,8 +166,8 @@ class DesignAgent:
         chat_history: List[Dict],
         current_config: Dict,
     ) -> Dict:
-        """Use Claude to interpret a design chat message into actionable changes."""
-        key = settings.anthropic_api_key
+        """Use OpenAI to interpret a design chat message into actionable changes."""
+        key = settings.openai_api_key
         if not key or len(key.strip()) < 10:
             return self._rule_based_interpret(user_message, current_config)
 
@@ -207,18 +207,16 @@ Reply in strict JSON only (no markdown fences)."""
 
         try:
             client = self._get_client()
-            message = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            completion = client.chat.completions.create(
+                model=settings.openai_model,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
             )
-            raw = message.content[0].text.strip()
-            if raw.startswith("```"):
-                parts = raw.split("```")
-                raw = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
+            raw = completion.choices[0].message.content.strip()
             return json.loads(raw)
         except Exception as e:
-            logger.warning("Claude interpretation failed: %s", e)
+            logger.warning("OpenAI interpretation failed: %s", e)
             return self._rule_based_interpret(user_message, current_config)
 
     def _rule_based_interpret(self, message: str, config: Dict) -> Dict:

@@ -2,7 +2,7 @@
 
 > **Plan perfectly. Arrive curious.**
 
-Click2GO is a multi-agent AI travel planner that scrapes real social media posts from Xiaohongshu (Red Note), runs every location through Claude AI verification, clusters them into geographically optimized daily routes, and generates an interactive map with a styled PDF itinerary — all from a single request.
+Click2GO is a multi-agent AI travel planner that scrapes real social media posts from Xiaohongshu (Red Note), runs every location through OpenAI (gpt-4o-mini) verification, clusters them into geographically optimized daily routes, and generates an interactive map with a styled PDF itinerary — all from a single request.
 
 You tell it where you're going and what kind of traveller you are. It does the research so you don't have to — you show up with a great plan and a full tank of curiosity.
 
@@ -56,7 +56,7 @@ You tell it where you're going and what kind of traveller you are. It does the r
 │         │                   │                   │                 │
 │  • Xiaohongshu      • K-Means          • Folium maps             │
 │    scraping           clustering       • ReportLab PDF           │
-│  • Claude AI         • Nearest-        • Map styling             │
+│  • OpenAI AI         • Nearest-        • Map styling             │
 │    verification        neighbour       • Distance labels         │
 │  • Fuzzy              sorting          • Category-based          │
 │    geocoding        • Transit gap        marker icons            │
@@ -85,11 +85,11 @@ The data-engineering agent. Keeps the destination database fresh and relevant.
 **Pipeline:**
 1. **Cache check** — Queries `poi_cache` table for the destination. If fresh data exists (< 72 hours) AND all requested persona categories are represented, returns immediately.
 2. **Scrape** — Builds persona-specific Xiaohongshu search queries (e.g., `Tokyo美食推荐` for foodie, `Tokyo拍照打卡` for photography). Falls back to curated mock POI templates (8 per persona) when the MCP scraper is unavailable.
-3. **Verify** — For each POI, fetches recent social media posts and sends them to Claude Sonnet for sentiment analysis. Claude evaluates three criteria:
+3. **Verify** — For each POI, fetches recent social media posts and sends them to OpenAI (gpt-4o-mini) for sentiment analysis. The model evaluates three criteria:
    - **Status**: Is it currently open? Any closures or renovations?
    - **Seasonality**: Does the vibe match the travel dates?
    - **Persona match**: Does it suit the traveller's style?
-   - Returns a structured JSON verdict: `INCLUDE` or `EXCLUDE` with a 0–10 persona score and a practical agent note.
+   - Returns a structured JSON verdict (via `response_format: json_object`): `INCLUDE` or `EXCLUDE` with a 0–10 persona score and a practical agent note.
 4. **Filter** — Drops POIs flagged as `EXCLUDE` or `is_open: false`. Sorts remaining by persona score.
 5. **Cache upsert** — Writes verified POIs to `poi_cache` for future sessions.
 6. **Sufficiency check** — The Supervisor evaluates whether enough POIs were found. If not (and fewer than 2 attempts), it loops back for another scrape round with broader queries.
@@ -118,7 +118,7 @@ The frontend developer agent. Generates and iterates on visual outputs.
 - Map style switching (Clean Light, Dark Mode, Satellite, Street Map)
 - Route line show/hide
 - Distance labels with estimated transit method (walk/bus/taxi/metro based on Haversine distance)
-- Interpretation uses Claude Sonnet when available, falls back to keyword-based rule matching.
+- Interpretation uses OpenAI (gpt-4o-mini) when available, falls back to keyword-based rule matching.
 
 ### Supervisor Flow
 
@@ -139,7 +139,7 @@ The sufficiency check requires at least `max(days * 2, 4)` included POIs. If ins
 |-----------|-----------|---------|
 | Web framework | **FastAPI** | Async HTTP server, background tasks, auto-generated OpenAPI docs |
 | Agent orchestration | **LangGraph** (StateGraph) | Multi-agent Supervisor pattern with conditional routing |
-| AI verification | **Claude Sonnet** (Anthropic API) | POI sentiment analysis, design request interpretation |
+| AI verification | **OpenAI gpt-4o-mini** | POI sentiment analysis, design request interpretation (JSON mode) |
 | Route optimization | **scikit-learn** (KMeans) + **NumPy** | Geographic day clustering + greedy nearest-neighbour sorting |
 | Map generation | **Folium** | Interactive Leaflet.js maps with custom DivIcon markers |
 | PDF generation | **ReportLab** | Branded A4 itinerary PDFs |
@@ -358,7 +358,7 @@ The legend shows both the category color key and day-colored route lines.
 
 - Python 3.9+
 - Docker (for the Xiaohongshu MCP scraper — optional)
-- An [Anthropic API key](https://console.anthropic.com/) (optional — falls back to neutral verification)
+- An [OpenAI API key](https://platform.openai.com/api-keys) (optional — falls back to neutral verification)
 - A [Google Maps API key](https://developers.google.com/maps) (optional — falls back to 60+ city lookup table)
 
 ### 1. Clone and install dependencies
@@ -374,7 +374,7 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env and fill in your keys:
-#   ANTHROPIC_API_KEY=sk-ant-...
+#   OPENAI_API_KEY=sk-...
 #   GOOGLE_MAPS_API_KEY=...   (optional)
 ```
 
@@ -409,7 +409,7 @@ python3 -m pytest tests/ -v
 - API endpoints (root, health, planning CRUD, status polling)
 - Planning session lifecycle (create → status → result)
 - Route optimizer (K-Means clustering, nearest-neighbour sorting, even distribution)
-- Verification agent (Claude response parsing, fallback behavior, schema validation)
+- Verification agent (OpenAI response parsing, fallback behavior, schema validation)
 - Social scraper (mock POIs, field completeness, post extraction, address parsing)
 - Itinerary exporter (PDF generation, map generation, GeoJSON fallback)
 - Postgres MCP safety (blocks INSERT, UPDATE, DELETE, DROP; allows SELECT)
@@ -423,7 +423,8 @@ Tests use an isolated SQLite database (tables recreated per test) and require no
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | No | Claude API key for POI verification + design interpretation. Falls back to neutral scores. |
+| `OPENAI_API_KEY` | No | OpenAI API key for POI verification + design interpretation. Falls back to neutral scores. |
+| `OPENAI_MODEL` | No | OpenAI model (default: `gpt-4o-mini`). |
 | `GOOGLE_MAPS_API_KEY` | No | Geocoding precision. Falls back to 60+ city lookup table with fuzzy matching. |
 | `REPLICATE_API_TOKEN` | No | Image generation (currently unused in UI). |
 | `MCP_SERVER_URL` | No | Xiaohongshu scraper URL (default: `http://localhost:18060/mcp`). |
@@ -440,7 +441,7 @@ All external dependencies degrade gracefully:
 | Dependency | Fallback behavior |
 |------------|------------------|
 | **Xiaohongshu MCP scraper** | Returns curated mock POIs — 8 templates per persona with realistic names, descriptions, and scores |
-| **Anthropic API (Claude)** | Verification returns `is_open: true`, `persona_score: 7.0` — all POIs included with "confirm status" note |
+| **OpenAI API** | Verification returns `is_open: true`, `persona_score: 7.0` — all POIs included with "confirm status" note |
 | **Google Maps API** | Falls back to 60+ city coordinate lookup table with fuzzy substring + character overlap matching |
 | **ReportLab** | Exports plain text `.txt` instead of styled PDF |
 | **Folium** | Exports `.geojson` instead of interactive HTML map |
@@ -464,7 +465,7 @@ click2GO/
 │   ├── agents/
 │   │   ├── supervisor.py           LangGraph Multi-Agent Supervisor
 │   │   ├── knowledge_agent.py      Agent 1: scrape → verify → cache
-│   │   ├── verification_agent.py   Claude-powered POI verification
+│   │   ├── verification_agent.py   OpenAI-powered POI verification
 │   │   ├── route_agent.py          Agent 2: cluster → fill gaps → write
 │   │   └── design_agent.py         Agent 3: maps, PDFs, map controls
 │   ├── services/

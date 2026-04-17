@@ -9,7 +9,7 @@ class VerificationAgent:
     Autonomous agent that verifies POI suitability using recent
     Xiaohongshu posts as evidence.
 
-    Uses Claude to assess three criteria:
+    Uses OpenAI (gpt-4o-mini) to assess three criteria:
       1. Status   – is the place open? any closures / renovations?
       2. Seasonality – does the current vibe match the travel dates?
       3. Persona Alignment – does it fit the traveller's style?
@@ -27,8 +27,8 @@ class VerificationAgent:
 
     def _get_client(self):
         if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            from openai import OpenAI
+            self._client = OpenAI(api_key=settings.openai_api_key)
         return self._client
 
     def verify(
@@ -40,7 +40,7 @@ class VerificationAgent:
         end_date: str,
     ) -> dict:
         """
-        Verify a POI using Claude-powered sentiment analysis.
+        Verify a POI using OpenAI-powered sentiment analysis.
 
         Returns a dict with keys:
           is_open, status_confidence, seasonal_match, persona_score,
@@ -49,7 +49,7 @@ class VerificationAgent:
         if not recent_posts:
             return self._fallback(poi_name, reason="no_posts")
 
-        key = settings.anthropic_api_key
+        key = settings.openai_api_key
         if not key or len(key.strip()) < 10:
             return self._fallback(poi_name, reason="no_api_key")
 
@@ -90,18 +90,13 @@ whether this location should appear in a personalised travel itinerary.
 
         try:
             client = self._get_client()
-            message = client.messages.create(
-                model="claude-sonnet-4-20250514",
+            completion = client.chat.completions.create(
+                model=settings.openai_model,
                 max_tokens=600,
                 messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
             )
-            raw = message.content[0].text.strip()
-
-            # Strip markdown fences if the model adds them anyway
-            if raw.startswith("```"):
-                parts = raw.split("```")
-                raw = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
-
+            raw = completion.choices[0].message.content.strip()
             return json.loads(raw)
 
         except json.JSONDecodeError:

@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # AI API Keys
-    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     google_maps_api_key: str = ""
 
     # Image Generation (Replicate – FLUX Schnell)
