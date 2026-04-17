@@ -146,3 +146,54 @@ async def get_chat(session_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Planning session not found")
 
     return {"session_id": session_id, "messages": get_chat_history(session_id)}
+
+
+_ALLOWED_MAP_CONFIG_KEYS = {"tile_layer", "show_routes", "show_distances"}
+
+
+@router.post("/plan/{session_id}/map-config")
+async def update_map_config(
+    session_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Apply deterministic UI-toggle changes to the map without invoking the LLM.
+    Body: {"changes": {"show_distances": true, ...}}
+    """
+    session = db.query(PlanningSession).filter(
+        PlanningSession.id == session_id
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Planning session not found")
+    if session.status != SessionStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Map is not ready yet.")
+
+    raw_changes = (body or {}).get("changes") or {}
+    changes = {k: v for k, v in raw_changes.items() if k in _ALLOWED_MAP_CONFIG_KEYS}
+    if not changes:
+        raise HTTPException(status_code=400, detail="No valid map-config changes supplied.")
+
+    profile = db.query(UserProfile).filter(
+        UserProfile.id == session.user_profile_id
+    ).first()
+    personas_list = (profile.personas.split(",") if profile and profile.personas
+                     else ["chilling"])
+    user_profile = {
+        "destination": profile.destination if profile else "Unknown",
+        "start_date": profile.start_date if profile else "",
+        "end_date": profile.end_date if profile else "",
+        "persona": profile.personas if profile else "chilling",
+        "personas": personas_list,
+    }
+    itinerary = _load_itinerary(session_id, db, personas=personas_list)
+
+    current = _session_map_configs.get(session_id, {})
+    new_config = {**current, **changes}
+    map_path = _design_agent._generate_styled_map(itinerary, user_profile, new_config)
+    _session_map_configs[session_id] = new_config
+
+    return {
+        "map_url": f"/outputs/{os.path.basename(map_path)}",
+        "map_config": new_config,
+    }

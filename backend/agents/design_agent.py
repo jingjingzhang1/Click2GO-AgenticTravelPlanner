@@ -197,9 +197,11 @@ Interpret this request and return a JSON object with these keys:
 - "response": A friendly message explaining what you did. If you CAN make the change, say what changed. If you CANNOT (the feature doesn't exist), honestly say so and suggest what you CAN do instead.
 - "map_changes": dict of config changes to apply (or null if no map changes). Valid keys:
   - "tile_layer": one of the available tile layer keys
-  - "show_routes": boolean (show/hide route lines)
-  - "show_distances": boolean (show distance labels between stops)
+  - "show_routes": boolean — true to show route lines, false to hide
+  - "show_distances": boolean — true to show distance labels between stops, false to hide
 - "pdf_regenerate": boolean (true if PDF needs regenerating)
+
+Mapping cues: "show/add/display X" → true. "hide/remove/turn off X" → false. Always include the boolean explicitly.
 
 IMPORTANT: If the user asks for something you cannot do, set map_changes to null and explain honestly in "response". Never pretend you made changes when you didn't.
 
@@ -248,9 +250,15 @@ Reply in strict JSON only (no markdown fences)."""
             response_parts.append("Showing route lines")
 
         # Distance labels
-        if "distance" in msg or "km" in msg or "commute" in msg or "transit" in msg or "transport" in msg:
-            changes["show_distances"] = True
-            response_parts.append("Adding distance labels between stops")
+        distance_kw = any(k in msg for k in ("distance", "km", "commute", "transit", "transport"))
+        if distance_kw:
+            off_intent = any(k in msg for k in ("hide", "remove", "off", " no ", "without"))
+            if off_intent:
+                changes["show_distances"] = False
+                response_parts.append("Hiding distance labels")
+            else:
+                changes["show_distances"] = True
+                response_parts.append("Adding distance labels between stops")
 
         # Honest response when nothing matched
         if not changes and "pdf" not in msg and "regenerate" not in msg:

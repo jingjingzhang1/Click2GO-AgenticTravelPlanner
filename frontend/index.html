@@ -708,29 +708,20 @@ async function applyMapChange(key, value) {
   mapConfig[key] = value;
   setControlStatus('Updating map...');
 
-  // Build a human-readable message for the backend
-  const messages = {
-    tile_layer: { dark: 'dark mode', satellite: 'satellite view',
-                  openstreetmap: 'street map', default: 'light mode' },
-  };
-  const msgText = (messages[key] && messages[key][value]) || `set ${key} to ${value}`;
-
   try {
-    const res = await fetch(`/api/v1/plan/${currentSessionId}/chat`, {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/map-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msgText }),
+      body: JSON.stringify({ changes: { [key]: value } }),
     });
 
     if (!res.ok) throw new Error('Failed');
     const data = await res.json();
 
-    if (data.map_updated && data.map_url) {
+    if (data.map_url) {
       document.getElementById('map-frame').src = data.map_url;
       document.getElementById('map-fullscreen-link').href = data.map_url;
-      setControlStatus(data.content);
-    } else {
-      setControlStatus(data.content);
+      setControlStatus('Map updated.');
     }
   } catch (e) {
     setControlStatus('Failed to update map.');
@@ -750,31 +741,7 @@ function toggleDistances() {
   const active = !btn.classList.contains('active');
   btn.classList.toggle('active');
   mapConfig.show_distances = active;
-  const msg = active ? 'show distances between stops' : 'hide distances';
-  sendControlMessage(msg);
-}
-
-async function sendControlMessage(message) {
-  if (!currentSessionId) return;
-  setControlStatus('Updating map...');
-
-  try {
-    const res = await fetch(`/api/v1/plan/${currentSessionId}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    });
-    if (!res.ok) throw new Error('Failed');
-    const data = await res.json();
-
-    if (data.map_updated && data.map_url) {
-      document.getElementById('map-frame').src = data.map_url;
-      document.getElementById('map-fullscreen-link').href = data.map_url;
-    }
-    setControlStatus(data.content);
-  } catch (e) {
-    setControlStatus('Failed to update map.');
-  }
+  applyMapChange('show_distances', active);
 }
 
 function setControlStatus(text) {

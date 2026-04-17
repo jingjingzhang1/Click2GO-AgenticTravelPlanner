@@ -41,7 +41,8 @@ You tell it where you're going and what kind of traveller you are. It does the r
 │  • POST /api/v1/plan → kicks off background pipeline             │
 │  • GET  /plan/{id}/status → poll progress                        │
 │  • GET  /plan/{id}/result → fetch itinerary + map/PDF URLs       │
-│  • POST /plan/{id}/chat → Design Agent map controls              │
+│  • POST /plan/{id}/chat → free-form Design Agent messages (LLM) │
+│  • POST /plan/{id}/map-config → deterministic UI toggles (no LLM)│
 │  • Static file serving: /outputs/*.html, /outputs/*.pdf          │
 └────────────────────────────┬────────────────────────────────────┘
                              │ BackgroundTasks
@@ -114,11 +115,10 @@ The frontend developer agent. Generates and iterates on visual outputs.
 - **PDF itinerary** — Branded A4 PDF via ReportLab with stats table, daily sections, AI notes, and persona scores.
 - **Interactive Folium map** — POI markers color-coded by category (🍜 foodie = orange, 📷 photography = gold, ☕ chilling = blue, 🥾 exercise = green). Day-colored route polylines. Configurable tile layers.
 
-**Post-generation controls (via chat endpoint):**
-- Map style switching (Clean Light, Dark Mode, Satellite, Street Map)
-- Route line show/hide
-- Distance labels with estimated transit method (walk/bus/taxi/metro based on Haversine distance)
-- Interpretation uses OpenAI (gpt-4o-mini) when available, falls back to keyword-based rule matching.
+**Post-generation controls (two paths):**
+- **Deterministic UI toggles** (`POST /plan/{id}/map-config`) — map style, route lines, distance labels. Bypasses the LLM entirely. Button clicks send a structured `{"changes": {...}}` payload and the map regenerates directly. No round-trip through a model means no refusals, no misinterpretation, no latency.
+- **Free-form chat** (`POST /plan/{id}/chat`) — natural-language requests are interpreted by OpenAI (gpt-4o-mini, JSON mode), with a keyword-based rule engine as fallback when the API is unavailable.
+- Distance labels include estimated transit method (walk/bus/taxi/metro based on Haversine distance).
 
 ### Supervisor Flow
 
@@ -227,8 +227,9 @@ All endpoints are prefixed with `/api/v1`. Full Swagger UI available at `/docs`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/plan/{id}/chat` | Send a design command to Agent 3 (map style, route lines, etc.) |
+| `POST` | `/plan/{id}/chat` | Free-form design message — interpreted by OpenAI, falls back to rule-based parsing. |
 | `GET` | `/plan/{id}/chat` | Retrieve chat history for a session. |
+| `POST` | `/plan/{id}/map-config` | Apply deterministic map-config changes (tile layer, routes, distances). Skips the LLM. Body: `{"changes": {"show_distances": true}}`. |
 
 ### Other Endpoints
 
@@ -349,6 +350,14 @@ The frontend is a single `index.html` file with no build step, no framework depe
 - 🥾 Green = Exercise
 
 The legend shows both the category color key and day-colored route lines.
+
+### 7. Deterministic UI Toggles Were Routed Through the LLM
+
+**Problem:** Every map-control click (style dropdown, route toggle, distance toggle) sent a natural-language phrase like "show distances between stops" to gpt-4o-mini, which translated it back into a config dict. After migrating from Claude to OpenAI, gpt-4o-mini started refusing legitimate toggles — e.g., replying "this feature is unfortunately not available" for a button whose entire purpose was that feature.
+
+**Root cause:** Using an LLM for deterministic UI state is the wrong tool. Button clicks already know exactly what config change they want — the round-trip through a model introduces failure modes (refusals, misinterpretation, latency) for zero benefit. Different models interpret identical prompts differently, so a provider swap silently broke the UI.
+
+**Solution:** Added a dedicated `POST /plan/{id}/map-config` endpoint that accepts a structured `{"changes": {...}}` payload and regenerates the map directly. The frontend's toggles now call this endpoint. The `/chat` endpoint still uses the LLM — but only for free-form natural-language messages, which is where the LLM actually adds value.
 
 ---
 
@@ -479,7 +488,7 @@ click2GO/
 │   │   └── postgres_mcp.py         Read-only SQL tool for Agent 2
 │   └── routers/
 │       ├── planning.py             POST /plan, GET /status, GET /result
-│       └── chat.py                 POST/GET /plan/{id}/chat
+│       └── chat.py                 /plan/{id}/chat + /plan/{id}/map-config
 ├── tests/
 │   └── test_click2go.py            58 tests
 ├── seed_database.sqlite            Pre-scraped POI cache (Git-tracked)
