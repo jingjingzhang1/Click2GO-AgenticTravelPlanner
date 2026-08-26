@@ -1,15 +1,15 @@
 """
-Preferences Router
-==================
+Preferences Router (thin controller)
+====================================
 POST /api/v1/preferences          – save a user preference profile
 GET  /api/v1/preferences/{id}     – retrieve a saved profile
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import UserProfile
 from ..schemas import PlanningRequest
+from ..services.preference_service import PreferenceService
 
 router = APIRouter()
 
@@ -17,43 +17,10 @@ router = APIRouter()
 @router.post("/preferences", status_code=201)
 async def save_preferences(request: PlanningRequest, db: Session = Depends(get_db)):
     """Persist a traveller preference profile for reuse across sessions."""
-    personas_str = ",".join(p.value for p in request.personas)
-    profile = UserProfile(
-        destination=request.destination,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        personas=personas_str,
-        allergies=request.constraints.allergies,
-        budget=request.constraints.budget,
-        language=request.language,
-    )
-    db.add(profile)
-    db.commit()
-    db.refresh(profile)
-
-    return {
-        "id": profile.id,
-        "destination": profile.destination,
-        "personas": personas_str,
-        "message": "Preferences saved successfully",
-    }
+    return PreferenceService(db).save(request)
 
 
 @router.get("/preferences/{profile_id}")
 async def get_preferences(profile_id: int, db: Session = Depends(get_db)):
     """Retrieve a previously saved traveller profile."""
-    profile = db.query(UserProfile).filter(UserProfile.id == profile_id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    return {
-        "id": profile.id,
-        "destination": profile.destination,
-        "start_date": profile.start_date,
-        "end_date": profile.end_date,
-        "personas": profile.personas,
-        "allergies": profile.allergies,
-        "budget": profile.budget,
-        "language": profile.language,
-        "created_at": profile.created_at.isoformat() if profile.created_at else None,
-    }
+    return PreferenceService(db).get(profile_id)

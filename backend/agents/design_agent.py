@@ -53,7 +53,10 @@ class DesignAgent:
     def _get_client(self):
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI(api_key=settings.openai_api_key)
+            kwargs = {"api_key": settings.openai_api_key}
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url
+            self._client = OpenAI(**kwargs)
         return self._client
 
     # ── Initial generation (called by supervisor) ────────────────────────

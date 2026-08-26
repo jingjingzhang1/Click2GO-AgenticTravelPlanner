@@ -43,7 +43,7 @@ class TestRootEndpoints:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "healthy"
-        assert body["version"] == "2.0.0"
+        assert body["version"] == "3.0.0"
 
     def test_docs_accessible(self):
         r = client.get("/docs")
@@ -412,59 +412,90 @@ class TestItineraryExporter:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 9. Social Scraper Tool (offline / mock mode)
+# 9. Place Provider (curated + Google Places hybrid)
 # ══════════════════════════════════════════════════════════════════════════════
 
-from backend.tools.social_scraper_tool import SocialScraperTool
+from backend.tools.place_provider import CuratedPlaceProvider, get_place_provider
 
 
-class TestSocialScraperTool:
+class TestPlaceProvider:
 
     def setup_method(self):
-        self.scraper = SocialScraperTool()
+        self.curated = CuratedPlaceProvider()
+        self.hybrid = get_place_provider()
 
-    def test_mock_pois_returns_list(self):
-        pois = self.scraper._mock_pois("Tokyo Coffee", 5)
-        assert isinstance(pois, list)
-        assert len(pois) == 5
+    def test_curated_new_york_returns_real_places(self):
+        places = self.curated.get_places("New York", ["photography", "chilling"], limit=20)
+        names = [p["name"] for p in places]
+        assert "Brooklyn Bridge" in names
+        assert "Devoción" in names
 
-    def test_mock_pois_have_required_fields(self):
-        pois = self.scraper._mock_pois("Tokyo", 3)
-        for poi in pois:
-            assert "name" in poi
-            assert "likes" in poi
+    def test_places_have_practical_fields(self):
+        places = self.curated.get_places("New York", ["photography"], limit=5)
+        for p in places:
+            assert "needs_reservation" in p
+            assert "website" in p
+            assert p.get("lat") is not None
 
-    def test_mock_recent_posts_returns_list(self):
-        posts = self.scraper._mock_recent_posts("Shibuya Crossing", 3)
-        assert len(posts) == 3
-        assert all("content" in p for p in posts)
+    def test_reservation_flag_present_for_ticketed_sites(self):
+        places = {p["name"]: p for p in self.curated.get_places("New York", ["photography"], 20)}
+        assert places["Statue of Liberty"]["needs_reservation"] is True
+        assert places["Statue of Liberty"]["reservation_url"]
 
-    def test_extract_pois_from_note_numbered_list(self):
-        note = {
-            "title": "Tokyo Must-Visit",
-            "content": "1. Shibuya Crossing\n2. Harajuku\n3. Shinjuku Gyoen",
-            "likes": 200,
-        }
-        pois = self.scraper._extract_pois_from_note(note)
-        assert len(pois) >= 1
-        names = [p["name"] for p in pois]
-        assert any("Shibuya" in n or "Harajuku" in n or "Shinjuku" in n for n in names)
+    def test_persona_filter_limits_categories(self):
+        places = self.curated.get_places("New York", ["chilling"], limit=20)
+        assert all(p["category"] == "chilling" for p in places)
 
-    def test_extract_pois_fallback_to_title(self):
-        note = {"title": "Best Ramen in Tokyo", "content": "Long prose with no list.", "likes": 50}
-        pois = self.scraper._extract_pois_from_note(note)
-        assert len(pois) == 1
-        assert "Ramen" in pois[0]["name"] or "Tokyo" in pois[0]["name"]
+    def test_hotels_returned_for_curated_city(self):
+        hotels = self.curated.get_hotels("New York")
+        assert len(hotels) >= 1
+        assert all("lat" in h and "website" in h for h in hotels)
 
-    def test_extract_address_japanese_postal(self):
-        text = "Visit STREAMER COFFEE\n〒106-0032 Tokyo, Minato City, Roppongi 6-11"
-        addr = self.scraper._extract_address(text, "STREAMER COFFEE")
-        assert addr is not None
-        assert "106" in addr
+    def test_unknown_city_uses_generic_fallback(self):
+        places = self.hybrid.get_places("Narnia", ["chilling"], limit=5)
+        assert isinstance(places, list)
+        assert len(places) >= 1
 
-    def test_search_pois_returns_list_when_offline(self):
-        pois = self.scraper.search_pois("Tokyo Coffee", max_results=5)
-        assert isinstance(pois, list)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 9b. Travel Journal
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestJournal:
+
+    def _make_session(self):
+        import uuid as _uuid
+        from backend.database import SessionLocal
+        from backend.models import PlanningSession, SessionStatus
+        db = SessionLocal()
+        sid = str(_uuid.uuid4())
+        db.add(PlanningSession(id=sid, status=SessionStatus.COMPLETED))
+        db.commit()
+        db.close()
+        return sid
+
+    def test_add_and_list_entry(self):
+        sid = self._make_session()
+        r = client.post(f"/api/v1/plan/{sid}/journal",
+                        json={"spot_name": "Brooklyn Bridge", "note": "Golden hour was unreal."})
+        assert r.status_code == 201
+        assert r.json()["spot_name"] == "Brooklyn Bridge"
+
+        r2 = client.get(f"/api/v1/plan/{sid}/journal")
+        assert r2.status_code == 200
+        assert len(r2.json()["entries"]) == 1
+
+    def test_entry_unknown_session_404(self):
+        r = client.post("/api/v1/plan/00000000-0000-0000-0000-000000000000/journal",
+                        json={"spot_name": "X"})
+        assert r.status_code == 404
+
+    def test_travel_log_counts(self):
+        sid = self._make_session()
+        client.post(f"/api/v1/plan/{sid}/journal", json={"spot_name": "MoMA", "note": "Loved it"})
+        r = client.get(f"/api/v1/plan/{sid}/travel-log")
+        assert r.status_code == 200
+        assert r.json()["entry_count"] == 1
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -549,3 +580,27 @@ class TestKnowledgeCache:
     def test_empty_cache_returns_empty_list(self):
         cached = get_cached_pois("Nonexistent City")
         assert cached == []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 12. MCP layer (server build + explorer factory)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestDBMCP:
+
+    def test_explorer_factory_defaults_to_inprocess_engine(self):
+        from backend.mcp import get_db_explorer
+        from backend.mcp.postgres_mcp import PostgresMCPServer
+
+        explorer = get_db_explorer()
+        assert isinstance(explorer, PostgresMCPServer)
+        # Duck-typed contract the Route Optimizer relies on.
+        assert hasattr(explorer, "find_nearby_pois")
+
+    def test_mcp_server_builds_and_registers_tools(self):
+        pytest.importorskip("mcp")  # optional dependency
+        from backend.mcp.db_server import build_server
+
+        server = build_server()
+        assert server is not None
+        assert hasattr(server, "run")  # FastMCP server is runnable

@@ -2,25 +2,68 @@
 
 > **Plan perfectly. Arrive curious.**
 
-Click2GO is a multi-agent AI travel planner that scrapes real social media posts from Xiaohongshu (Red Note), runs every location through OpenAI (gpt-4o-mini) verification, clusters them into geographically optimized daily routes, and generates an interactive map with a styled PDF itinerary — all from a single request.
+[![CI](https://github.com/jingjingzhang1/Click2GO-AgenticTravelPlanner/actions/workflows/ci.yml/badge.svg)](https://github.com/jingjingzhang1/Click2GO-AgenticTravelPlanner/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.9%20|%203.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688)
+![LangGraph](https://img.shields.io/badge/LangGraph-multi--agent-orange)
+![Postgres](https://img.shields.io/badge/PostgreSQL-|%20SQLite-336791)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-You tell it where you're going and what kind of traveller you are. It does the research so you don't have to — you show up with a great plan and a full tank of curiosity.
+Click2GO is a multi-agent AI travel planner. You tell it where you're going and
+what kind of traveller you are; three specialized agents coordinated by a
+**LangGraph Supervisor** scrape real social-media posts from Xiaohongshu (Red
+Note), run every location through LLM verification, cluster them into
+geographically optimized daily routes, and produce an **interactive map**, a
+**branded PDF itinerary**, and a **Gemini-generated travel poster** — all from a
+single request.
+
+The codebase is built as a teaching-quality reference for **clean layered
+architecture**: a strict `router → service → repository → ORM` separation with
+dedicated mapper and provider layers, first-class **PostgreSQL** support with
+**Alembic** migrations, **structured logging + Prometheus metrics**, a
+one-command **Docker Compose** stack, and **CI** on every push.
 
 ---
 
 ## Table of Contents
 
+- [Highlights](#highlights)
 - [System Architecture](#system-architecture)
+- [Layered Backend Architecture](#layered-backend-architecture)
 - [Multi-Agent Pipeline](#multi-agent-pipeline)
+- [Poster Generation (Gemini)](#poster-generation-gemini)
+- [Database Design & Hosting Your Own](#database-design--hosting-your-own)
+- [Observability](#observability)
 - [Tech Stack](#tech-stack)
-- [Database Design](#database-design)
 - [API Reference](#api-reference)
-- [Frontend](#frontend)
-- [Key Engineering Decisions & Bugs Solved](#key-engineering-decisions--bugs-solved)
 - [Quick Start](#quick-start)
-- [Running Tests](#running-tests)
+- [Running with Docker + Postgres](#running-with-docker--postgres)
+- [Testing & CI](#testing--ci)
 - [Environment Variables](#environment-variables)
-- [Offline / Fallback Mode](#offline--fallback-mode)
+- [Key Engineering Decisions](#key-engineering-decisions)
+- [Project Structure](#project-structure)
+
+---
+
+## Highlights
+
+- **Layered, testable backend** — thin FastAPI controllers delegate to an
+  application **service layer**, which orchestrates a **repository (DAO) layer**
+  and pure **mappers**. No router touches the ORM directly; no service writes raw
+  SQL.
+- **Bring-your-own database** — zero-config SQLite by default; point
+  `DATABASE_URL` at Postgres and the app runs pooled connections with schema
+  managed by **Alembic migrations**. `docker compose up` gives every fork its own
+  Postgres instance.
+- **Multi-agent orchestration** — a LangGraph Supervisor coordinates a Knowledge
+  Manager, a Route Optimizer, and a Design Agent with conditional retry routing.
+- **Gemini 2.5 Flash Image posters** — a provider-strategy chain
+  (Gemini → Replicate → Pollinations) renders a poster whose *text* (title, day
+  labels, highlights) is legible — Gemini's headline strength.
+- **Production hygiene** — structured JSON logging with request-ID correlation,
+  a `/metrics` Prometheus endpoint, an enriched `/health`, typed settings, a
+  Dockerfile that runs as non-root with a healthcheck, and GitHub Actions CI
+  (ruff + pytest on SQLite and a Postgres migration smoke test).
 
 ---
 
@@ -30,141 +73,138 @@ You tell it where you're going and what kind of traveller you are. It does the r
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Frontend (index.html)                     │
 │  Single-page web UI — no build step, vanilla JS                  │
-│  • Planning form with persona picker                             │
-│  • Real-time progress polling with agent step indicators         │
-│  • Inline route map (iframe) with map style/toggle controls      │
-│  • POI cards with verification badges + AI agent notes           │
 └────────────────────────────┬────────────────────────────────────┘
-                             │ HTTP (fetch)
+                             │ HTTP (fetch) · X-Request-ID
 ┌────────────────────────────▼────────────────────────────────────┐
 │                     FastAPI Backend (main.py)                     │
-│  • POST /api/v1/plan → kicks off background pipeline             │
-│  • GET  /plan/{id}/status → poll progress                        │
-│  • GET  /plan/{id}/result → fetch itinerary + map/PDF URLs       │
-│  • POST /plan/{id}/chat → free-form Design Agent messages (LLM) │
-│  • POST /plan/{id}/map-config → deterministic UI toggles (no LLM)│
-│  • Static file serving: /outputs/*.html, /outputs/*.pdf          │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ BackgroundTasks
-┌────────────────────────────▼────────────────────────────────────┐
-│              LangGraph Multi-Agent Supervisor                     │
+│  RequestContext middleware · structured logs · /metrics · /health │
 │                                                                   │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐         │
-│  │   Agent 1     │   │   Agent 2     │   │   Agent 3     │       │
-│  │  Knowledge    │──▶│    Route      │──▶│   Design &    │       │
-│  │  Manager      │   │  Optimizer    │   │   UI Agent    │       │
-│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘         │
-│         │                   │                   │                 │
-│  • Xiaohongshu      • K-Means          • Folium maps             │
-│    scraping           clustering       • ReportLab PDF           │
-│  • OpenAI AI         • Nearest-        • Map styling             │
-│    verification        neighbour       • Distance labels         │
-│  • Fuzzy              sorting          • Category-based          │
-│    geocoding        • Transit gap        marker icons            │
-│  • POI cache          filling (MCP)                              │
-│    management                                                     │
-└──────────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                    SQLite Database (click2go.db)                   │
-│  Tables: user_profiles, planning_sessions, pois, itinerary_days, │
-│          poi_cache, chat_messages                                  │
-└──────────────────────────────────────────────────────────────────┘
+│   Routers (thin controllers)                                      │
+│        │  delegate to                                             │
+│   Service layer  ── PlanningService · ImageService · ChatService  │
+│        │  uses                     · PreferenceService            │
+│   Repository (DAO) layer  ── Session/POI/Profile/Cache/Chat repos │
+│        │  + Mappers (ORM ↔ DTO ↔ agent dicts)                     │
+│   SQLAlchemy ORM                                                  │
+└──────────┬───────────────────────────────────┬──────────────────┘
+           │ BackgroundTasks                    │
+┌──────────▼───────────────────────┐   ┌────────▼──────────────────┐
+│   LangGraph Multi-Agent Supervisor│   │  Image provider chain      │
+│   Agent1 Knowledge → Agent2 Route │   │  Gemini → Replicate →      │
+│         → Agent3 Design           │   │  Pollinations              │
+└──────────┬────────────────────────┘   └───────────────────────────┘
+           │
+┌──────────▼───────────────────────────────────────────────────────┐
+│         Database  ·  SQLite (default)  or  PostgreSQL (opt-in)     │
+│  user_profiles · planning_sessions · pois · itinerary_days ·      │
+│  poi_cache · chat_messages     — schema managed by Alembic         │
+└───────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Layered Backend Architecture
+
+Every request flows through the same one-directional stack. Each layer has a
+single responsibility and depends only on the layer beneath it:
+
+```
+HTTP request
+   │
+   ▼
+Router (backend/routers/*)        Thin controller. Parses/validates input,
+   │                              calls one service method, returns a DTO.
+   ▼                              No business logic, no ORM.
+Service (backend/services/*)      Application/use-case logic. Owns transaction
+   │                              boundaries, raises domain exceptions
+   ▼                              (NotFound/Conflict/InProgress). No raw SQL.
+Repository / DAO (backend/repositories/*)   All database access lives here.
+   │                              Intention-revealing query methods over one
+   ▼                              aggregate each. Never commits on its own.
+Mapper (backend/mappers/*)        Pure ORM ↔ DTO ↔ agent-dict translation.
+   │
+   ▼
+SQLAlchemy ORM (backend/models.py)  →  SQLite / PostgreSQL
+```
+
+Domain exceptions are translated to HTTP status codes by global handlers in
+`main.py` (`NotFoundError → 404`, `ConflictError → 400`, `InProgressError → 202`),
+so the service layer stays completely transport-agnostic and unit-testable.
+
+| Concern | Location |
+|---------|----------|
+| Controllers | `backend/routers/` |
+| Use-case orchestration | `backend/services/` (`planning`, `image`, `chat`, `preference`) |
+| Data access (DAO) | `backend/repositories/` (`session`, `poi`, `poi_cache`, `profile`, `chat`) |
+| ORM ↔ DTO mapping | `backend/mappers/` |
+| Domain errors | `backend/services/exceptions.py` |
+| Cross-cutting (logging/metrics) | `backend/observability/` |
+| Image provider strategy | `backend/tools/image_providers/` |
+
+The agent-facing `backend/tools/db_tools.py` is kept as a stable façade over the
+repository layer, so agent code and the existing test-suite have a simple import
+surface while persistence details stay centralised.
 
 ---
 
 ## Multi-Agent Pipeline
 
-Click2GO uses the **LangGraph Supervisor** pattern to coordinate three specialized agents in a structured pipeline with conditional routing.
+Click2GO uses the **LangGraph Supervisor** pattern to coordinate three
+specialized agents with conditional routing.
 
-### Agent 1: Knowledge Manager (`knowledge_agent.py`)
+**Agent 1 — Knowledge Manager (`knowledge_agent.py`):** cache check (72h TTL +
+persona coverage) → persona-specific Xiaohongshu scraping (mock fallback) → LLM
+verification (open? seasonal? persona match?) → filter → cache upsert.
 
-The data-engineering agent. Keeps the destination database fresh and relevant.
+**Agent 2 — Route Optimizer (`route_agent.py`):** K-Means clustering into
+`num_days` geographic zones → greedy nearest-neighbour sorting → transit-gap
+filling via the read-only SQL tool → ORM write.
 
-**Pipeline:**
-1. **Cache check** — Queries `poi_cache` table for the destination. If fresh data exists (< 72 hours) AND all requested persona categories are represented, returns immediately.
-2. **Scrape** — Builds persona-specific Xiaohongshu search queries (e.g., `Tokyo美食推荐` for foodie, `Tokyo拍照打卡` for photography). Falls back to curated mock POI templates (8 per persona) when the MCP scraper is unavailable.
-3. **Verify** — For each POI, fetches recent social media posts and sends them to OpenAI (gpt-4o-mini) for sentiment analysis. The model evaluates three criteria:
-   - **Status**: Is it currently open? Any closures or renovations?
-   - **Seasonality**: Does the vibe match the travel dates?
-   - **Persona match**: Does it suit the traveller's style?
-   - Returns a structured JSON verdict (via `response_format: json_object`): `INCLUDE` or `EXCLUDE` with a 0–10 persona score and a practical agent note.
-4. **Filter** — Drops POIs flagged as `EXCLUDE` or `is_open: false`. Sorts remaining by persona score.
-5. **Cache upsert** — Writes verified POIs to `poi_cache` for future sessions.
-6. **Sufficiency check** — The Supervisor evaluates whether enough POIs were found. If not (and fewer than 2 attempts), it loops back for another scrape round with broader queries.
-
-Each POI is tagged with its source `category` (foodie, photography, chilling, exercise) so filtering and map visualization work correctly.
-
-### Agent 2: Route Optimizer (`route_agent.py`)
-
-The logistical brain. Uses a hybrid MCP/ORM workflow.
-
-**Pipeline:**
-1. **K-Means clustering** — Groups geocoded POIs into `num_days` geographic zones using scikit-learn's KMeans. Each cluster becomes one day's itinerary.
-2. **Nearest-neighbour sorting** — Within each cluster, sorts POIs with a greedy nearest-neighbour heuristic starting from the northernmost point (natural "morning start") to minimize backtracking.
-3. **Transit gap filling** — Scans each day for gaps > 3km between consecutive stops. Uses the read-only Postgres MCP server to query `poi_cache` for nearby filler POIs to bridge gaps.
-4. **ORM write** — Persists the finalized itinerary (day assignments, stop order) via strict SQLAlchemy ORM functions.
-
-### Agent 3: Design & UI Agent (`design_agent.py`)
-
-The frontend developer agent. Generates and iterates on visual outputs.
-
-**Initial generation:**
-- **PDF itinerary** — Branded A4 PDF via ReportLab with stats table, daily sections, AI notes, and persona scores.
-- **Interactive Folium map** — POI markers color-coded by category (🍜 foodie = orange, 📷 photography = gold, ☕ chilling = blue, 🥾 exercise = green). Day-colored route polylines. Configurable tile layers.
-
-**Post-generation controls (two paths):**
-- **Deterministic UI toggles** (`POST /plan/{id}/map-config`) — map style, route lines, distance labels. Bypasses the LLM entirely. Button clicks send a structured `{"changes": {...}}` payload and the map regenerates directly. No round-trip through a model means no refusals, no misinterpretation, no latency.
-- **Free-form chat** (`POST /plan/{id}/chat`) — natural-language requests are interpreted by OpenAI (gpt-4o-mini, JSON mode), with a keyword-based rule engine as fallback when the API is unavailable.
-- Distance labels include estimated transit method (walk/bus/taxi/metro based on Haversine distance).
-
-### Supervisor Flow
+**Agent 3 — Design Agent (`design_agent.py`):** branded ReportLab PDF +
+interactive Folium map (category-colored markers, day-colored routes,
+distance/transit labels) + optional Gemini poster. Post-generation, deterministic
+UI toggles bypass the LLM entirely while free-form chat uses it.
 
 ```
 START → knowledge_manager → check_sufficiency ─┬─ ok ────→ route_optimizer → design_agent → END
                                                  ├─ retry ──→ knowledge_manager (loop)
-                                                 └─ force ──→ route_optimizer (proceed with what we have)
+                                                 └─ force ──→ route_optimizer (proceed)
 ```
 
-The sufficiency check requires at least `max(days * 2, 4)` included POIs. If insufficient after 2 attempts, it forces the pipeline forward with whatever was collected.
+---
+
+## Poster Generation (Gemini)
+
+The final flourish is a stylized travel poster. Rendering is abstracted behind a
+**provider-strategy + chain-of-responsibility** design in
+`backend/tools/image_providers/`:
+
+| Provider | Model | Role | Output |
+|----------|-------|------|--------|
+| **Gemini** | `gemini-2.5-flash-image` ("Nano Banana") | primary | inline image bytes |
+| **Replicate** | FLUX Schnell | fallback | remote URL |
+| **Pollinations** | FLUX (keyless) | last resort | remote URL |
+
+Providers are attempted in the order set by `IMAGE_PROVIDER_PRIORITY`; any whose
+credentials are missing is skipped automatically. Gemini is primary because it
+renders **legible text inside the image** — exactly what a travel-guide poster
+needs (title, day labels, highlight captions). The `ImageService` normalises both
+inline-bytes and remote-URL results into a locally-served asset under `/outputs`.
+
+Trigger it explicitly via `POST /api/v1/plan/{id}/generate-image`, or set
+`AUTO_GENERATE_POSTER=true` to render it as the final pipeline step.
+
+```python
+# gemini_provider.py (essence)
+from google import genai
+client = genai.Client(api_key=settings.gemini_api_key)
+resp = client.models.generate_content(model="gemini-2.5-flash-image", contents=[prompt])
+image_bytes = resp.candidates[0].content.parts[0].inline_data.data
+```
 
 ---
 
-## Tech Stack
-
-### Backend
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Web framework | **FastAPI** | Async HTTP server, background tasks, auto-generated OpenAPI docs |
-| Agent orchestration | **LangGraph** (StateGraph) | Multi-agent Supervisor pattern with conditional routing |
-| AI verification | **OpenAI gpt-4o-mini** | POI sentiment analysis, design request interpretation (JSON mode) |
-| Route optimization | **scikit-learn** (KMeans) + **NumPy** | Geographic day clustering + greedy nearest-neighbour sorting |
-| Map generation | **Folium** | Interactive Leaflet.js maps with custom DivIcon markers |
-| PDF generation | **ReportLab** | Branded A4 itinerary PDFs |
-| Database ORM | **SQLAlchemy 2.0** | SQLite persistence with seed database architecture |
-| Settings | **pydantic-settings** | Type-safe configuration from `.env` files |
-| Geocoding | **Google Maps API** (optional) | Address → coordinates; falls back to 60+ city lookup table with fuzzy matching |
-| Social scraping | **Xiaohongshu MCP Server** (Docker) | Real travel post scraping; falls back to curated mock data |
-
-### Frontend
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| UI | **Vanilla HTML/CSS/JS** | No build step, no framework — single `index.html` file |
-| Map display | **iframe** embedding | Inline Folium map with controls below |
-| Styling | **CSS custom properties** | Consistent theming with Click2GO brand colors |
-
-### Infrastructure
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Database | **SQLite** | Zero-config, file-based. Seed database ships pre-populated via Git |
-| Containerization | **Docker** | Xiaohongshu MCP scraper runs as a Docker container |
-| Testing | **pytest** + **FastAPI TestClient** | 58 tests covering all agents, tools, endpoints, and MCP safety |
-
----
-
-## Database Design
+## Database Design & Hosting Your Own
 
 ### Entity-Relationship Model
 
@@ -172,74 +212,125 @@ The sufficiency check requires at least `max(days * 2, 4)` included POIs. If ins
 user_profiles ──< planning_sessions ──< pois
                                     ──< itinerary_days
                                     ──< chat_messages
-
 poi_cache (standalone — destination-level cache)
 ```
 
-### Tables
+Six tables: `user_profiles`, `planning_sessions`, `pois`, `itinerary_days`,
+`poi_cache`, `chat_messages`. See `backend/models.py` for the full schema.
 
-**`user_profiles`** — Stores trip parameters per planning request.
-- `destination`, `start_date`, `end_date`, `personas` (comma-separated), `allergies` (JSON), `budget`
+### Two ways to run
 
-**`planning_sessions`** — Tracks each pipeline run.
-- `id` (UUID), `status` (pending → scraping → verifying → routing → exporting → completed/failed)
-- `total_pois_scraped`, `total_pois_verified`, `total_pois_included` — progress counters
-- `error_message`, `created_at`, `completed_at`
+**1. SQLite (default, zero-config).** A Git-tracked `seed_database.sqlite` ships
+pre-scraped POIs. On first run it's copied to a local `click2go.db`; after a
+`git pull`, new seed POIs are merged into `poi_cache` without touching your
+itineraries.
 
-**`pois`** — POIs assigned to a session's itinerary.
-- Location: `name`, `address`, `lat`, `lng`, `category`
-- Verification: `is_open`, `seasonal_match`, `persona_score`, `verification_recommendation`, `agent_note`
-- Routing: `day_number`, `stop_order`
+**2. PostgreSQL (host your own).** Set `DATABASE_URL` to a Postgres DSN and the
+app switches to a pooled engine. Schema is provisioned with **Alembic**:
 
-**`poi_cache`** — Destination-level cache managed by Agent 1.
-- Same fields as `pois` plus `destination`, `persona_tags`, `verified_at`
-- Cache freshness: 72-hour TTL based on `verified_at` timestamp
+```bash
+export DATABASE_URL=postgresql+psycopg://click2go:click2go@localhost:5432/click2go
+alembic upgrade head          # create the schema
+```
 
-**`itinerary_days`** — Day-level routing metadata.
-- `day_number`, `poi_sequence` (JSON), `cluster_center_lat/lng`
+`docker compose up` provisions Postgres, waits for it, applies migrations, and
+serves the API — so anyone who forks the repo gets their own hosted planning
+database with a single command. Add or evolve tables with:
 
-**`chat_messages`** — Design Agent chat history.
-- `role` (user/assistant), `content`, `metadata` (JSON)
+```bash
+make revision m="add saved_trips table"   # alembic revision --autogenerate
+make migrate                               # alembic upgrade head
+```
 
-### Seed Database Architecture
+---
 
-The project uses a two-file SQLite strategy:
-- `seed_database.sqlite` — Master file tracked in Git with pre-scraped POIs for popular cities
-- `click2go.db` — User's local copy (gitignored), auto-created on first run by copying the seed
+## Observability
 
-On startup, if the seed file is newer than the local copy, new POIs are merged into `poi_cache` without touching the user's itineraries or session data.
+| Feature | Detail |
+|---------|--------|
+| **Structured logging** | `LOG_FORMAT=json` emits one JSON object per line (ts, level, logger, message, `request_id`, service). `console` format for local dev. |
+| **Request correlation** | `RequestContextMiddleware` assigns/propagates an `X-Request-ID`, times every request, and logs a single access line. The ID rides a `contextvar` into every log record. |
+| **Metrics** | `GET /metrics` exposes Prometheus-format counters (requests by method/status) and per-route average latency. |
+| **Health** | `GET /health` returns status, version, environment, DB backend, and uptime. |
+
+---
+
+## Model Context Protocol (MCP)
+
+Click2GO ships a **real MCP server** exposing the database's read-only tools, and
+consumes them through a **real MCP client** — demonstrating both sides of the
+protocol.
+
+`backend/mcp/db_server.py` is a FastMCP (official `mcp` SDK) server that wraps the
+read-only engine and exposes four tools: `list_tables`, `describe_table`,
+`execute_query` (SELECT-only), and `find_nearby_pois`. Because the engine blocks
+every mutating statement and forces a `LIMIT`, it is safe to let an LLM compose
+exploratory queries against it — the read-only guard is the security boundary.
+
+**Two consumers, one server:**
+
+- **The Route Optimizer agent** normally calls the engine in-process for speed.
+  Set `DB_MCP_ENABLED=true` and it instead reaches the same tools over a genuine
+  MCP stdio round-trip (`backend/mcp/client.py`) — the app dogfooding its own MCP
+  server. The `get_db_explorer()` factory swaps implementations behind an
+  identical `find_nearby_pois(...)` signature, so agent code is unchanged.
+- **Claude Desktop / Cursor / any MCP client** can add it as a local server and
+  query the travel database directly:
+
+  ```bash
+  python -m backend.mcp.db_server        # run over stdio
+  ```
+
+  ```jsonc
+  // claude_desktop_config.json  (see claude_desktop_config.example.json)
+  {
+    "mcpServers": {
+      "click2go-db": {
+        "command": "python",
+        "args": ["-m", "backend.mcp.db_server"],
+        "cwd": "/absolute/path/to/Click2GO-AgenticTravelPlanner"
+      }
+    }
+  }
+  ```
+
+  Writes are never exposed over MCP — they always go through the ORM layer.
+
+---
+
+## Tech Stack
+
+**Backend:** FastAPI · LangGraph (Supervisor) · **MCP** (server + client) · OpenAI `gpt-4o-mini`
+(verification + design interpretation) · scikit-learn KMeans + NumPy · Folium ·
+ReportLab · SQLAlchemy 2.0 · Alembic · pydantic-settings.
+
+**Image:** Google Gen AI SDK (`gemini-2.5-flash-image`) · Replicate FLUX Schnell ·
+Pollinations.
+
+**Data:** PostgreSQL (psycopg 3) or SQLite. **Infra:** Docker + Docker Compose,
+GitHub Actions CI, ruff + mypy + pre-commit. **Frontend:** vanilla HTML/CSS/JS,
+single file, no build step.
 
 ---
 
 ## API Reference
 
-All endpoints are prefixed with `/api/v1`. Full Swagger UI available at `/docs`.
-
-### Planning Endpoints
+All endpoints are prefixed with `/api/v1`; Swagger UI at `/docs`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/plan` | Start a planning session. Returns `session_id` immediately (HTTP 202). |
-| `GET` | `/plan/{id}/status` | Poll pipeline progress (poll every 2–3s). |
-| `GET` | `/plan/{id}/result` | Fetch finished itinerary, map URL, PDF URL, stats. |
+| `POST` | `/plan` | Start a planning session (HTTP 202, returns `session_id`). |
+| `GET` | `/plan/{id}/status` | Poll pipeline progress. |
+| `GET` | `/plan/{id}/result` | Fetch itinerary + map/PDF URLs. |
+| `POST` | `/plan/{id}/generate-image` | Render the Gemini travel poster. Body: `{"language":"en"}`. |
+| `POST` | `/plan/{id}/chat` | Free-form Design-Agent message (LLM). |
+| `GET` | `/plan/{id}/chat` | Retrieve chat history. |
+| `POST` | `/plan/{id}/map-config` | Deterministic map toggles (no LLM). |
+| `POST` | `/preferences` | Save a traveller profile. |
+| `GET` | `/preferences/{id}` | Retrieve a saved profile. |
+| `GET` | `/health` · `/metrics` | Ops endpoints. |
 
-### Chat / Design Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/plan/{id}/chat` | Free-form design message — interpreted by OpenAI, falls back to rule-based parsing. |
-| `GET` | `/plan/{id}/chat` | Retrieve chat history for a session. |
-| `POST` | `/plan/{id}/map-config` | Apply deterministic map-config changes (tile layer, routes, distances). Skips the LLM. Body: `{"changes": {"show_distances": true}}`. |
-
-### Other Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Serve the web UI (`frontend/index.html`). |
-| `GET` | `/health` | Health check. |
-| `GET` | `/docs` | Auto-generated Swagger UI. |
-
-### Planning Request Body
+### Planning request body
 
 ```json
 {
@@ -247,266 +338,150 @@ All endpoints are prefixed with `/api/v1`. Full Swagger UI available at `/docs`.
   "start_date": "2026-04-01",
   "end_date": "2026-04-03",
   "personas": ["photography", "foodie"],
-  "constraints": {
-    "allergies": ["nuts"],
-    "budget": "mid-range"
-  },
-  "max_pois_per_day": 5
+  "constraints": { "allergies": ["nuts"], "budget": "mid-range" },
+  "max_pois_per_day": 5,
+  "language": "en"
 }
 ```
-
-- `personas`: any combination of `photography`, `chilling`, `foodie`, `exercise`
-- `budget`: `budget`, `mid-range`, or `luxury`
-
-### Session Status Flow
-
-```
-pending → scraping → verifying → routing → exporting → completed
-                                                      → failed
-```
-
----
-
-## Frontend
-
-The frontend is a single `index.html` file with no build step, no framework dependencies — vanilla HTML, CSS, and JavaScript.
-
-### Planning Form
-- Destination input with 60+ supported cities (fuzzy matching handles typos)
-- Date picker with duration dropdown (1 day to 1 month)
-- Persona grid: Photography (📷), Chilling (☕), Foodie (🍜), Exercise (🥾) — multi-select
-- Budget selector, max stops per day, dietary restrictions
-
-### Progress Display
-- Real-time progress bar polling `/plan/{id}/status` every 2.5 seconds
-- Four-step agent indicator showing which agent is currently active
-- Agent labels (Agent 1, Agent 2, Agent 3) correspond to the three pipeline agents
-
-### Results Display
-- Stats row: POIs Discovered / AI-Verified / Included
-- Day-by-day POI cards with:
-  - Verification badge (Open / Closed / Unverified)
-  - Persona star rating (0–10 scale)
-  - AI agent note (practical travel tip)
-- Inline route map embedded as iframe
-- Map controls: tile style dropdown, route lines toggle, distance labels toggle
-- Download links: full-screen map, PDF itinerary
-
----
-
-## Key Engineering Decisions & Bugs Solved
-
-### 1. POI Cache Inconsistency with Persona Switching
-
-**Problem:** When a user generated a trip with "chilling" then regenerated with "chilling + foodie," the map only showed chilling spots. Conversely, switching to "foodie only" showed both types.
-
-**Root cause:** Every POI was tagged with `persona_tags` set to ALL of the user's selected personas (e.g., `["chilling", "foodie"]`), not the POI's actual category. When the cache filter checked "does any of the user's new personas appear in this POI's tags?", chilling POIs matched on "chilling" even in a "foodie only" request — because they'd been tagged `["chilling", "foodie"]` from the previous run.
-
-**Solution:**
-1. Introduced a `category` field on each POI, set to the specific persona that sourced it (e.g., a dumpling shop gets `category: "foodie"`, a hiking trail gets `category: "exercise"`).
-2. Changed `_filter_by_persona()` to filter by `category` instead of `persona_tags`.
-3. Added a **persona coverage check** to the cache: even if enough total POIs exist, the cache is skipped unless ALL requested persona categories are represented. This forces a fresh scrape when the user adds a new travel style.
-
-### 2. Blank Route Map (No POI Markers)
-
-**Problem:** The generated map showed the correct region but no POI markers — just an empty tile layer.
-
-**Root cause:** Mock POIs had no `lat`/`lng` fields. The geocoder was supposed to resolve addresses to coordinates, but mock addresses like "Tokyo" were too generic, and typos in destination names (e.g., "Vancuvour") caused the city lookup to fail silently.
-
-**Solution:**
-1. Mock POIs now embed `lat`/`lng` directly using city-center coordinates + random jitter (±0.03 degrees).
-2. Added fuzzy geocoding with bidirectional substring matching and >60% character overlap fallback, so "Vancuvour" resolves to "Vancouver."
-
-### 3. All POIs Showing as "Unverified"
-
-**Problem:** Every POI in the itinerary displayed an "Unverified" badge despite passing through the verification pipeline.
-
-**Root cause:** The verification agent's fallback path (used when no API key is available or when post parsing fails) returned `is_open: None` for some code paths. The frontend rendered `is_open === null` as "Unverified."
-
-**Solution:** Changed ALL fallback paths in `VerificationAgent._fallback()` to return `is_open: True` with `persona_score: 7.0` and `seasonal_match: True`. In dev/demo mode, it's better to optimistically include POIs with a warning note ("Confirm status before visiting") than to show everything as unverified.
-
-### 4. Static File Mount Race Condition
-
-**Problem:** Generated map and PDF files returned 404 errors despite existing on disk.
-
-**Root cause:** FastAPI's `StaticFiles` mount was registered before the `outputs/` directory was created. The `os.makedirs("outputs")` call was inside the lifespan handler, which runs AFTER `app.mount()`. FastAPI's `StaticFiles` validates the directory exists at mount time.
-
-**Solution:** Moved `os.makedirs("outputs", exist_ok=True)` to module level, before `app.mount("/outputs", ...)`.
-
-### 5. Design Agent Honesty Problem
-
-**Problem:** When users sent requests the Design Agent couldn't handle (e.g., "add weather forecast overlay"), it responded with "I'll make those changes for you" — implying success when nothing changed.
-
-**Solution:** Rewrote the rule-based fallback to honestly respond "I'm not sure how to make that change" and list available capabilities. The frontend was also redesigned from a free-text chat input to explicit dropdown/toggle controls, making it impossible to send unsupported requests.
-
-### 6. Map Category Visualization
-
-**Problem:** The "Highlight Style" dropdown applied a single persona color to ALL markers, which was misleading — a coffee shop and a hiking trail both turned orange if you selected "foodie highlight."
-
-**Solution:** Removed the manual highlight dropdown entirely. Instead, each POI's map marker is automatically colored and labeled by its `category`:
-- 🍜 Orange = Foodie
-- 📷 Gold = Photography
-- ☕ Blue = Chilling
-- 🥾 Green = Exercise
-
-The legend shows both the category color key and day-colored route lines.
-
-### 7. Deterministic UI Toggles Were Routed Through the LLM
-
-**Problem:** Every map-control click (style dropdown, route toggle, distance toggle) sent a natural-language phrase like "show distances between stops" to gpt-4o-mini, which translated it back into a config dict. After migrating from Claude to OpenAI, gpt-4o-mini started refusing legitimate toggles — e.g., replying "this feature is unfortunately not available" for a button whose entire purpose was that feature.
-
-**Root cause:** Using an LLM for deterministic UI state is the wrong tool. Button clicks already know exactly what config change they want — the round-trip through a model introduces failure modes (refusals, misinterpretation, latency) for zero benefit. Different models interpret identical prompts differently, so a provider swap silently broke the UI.
-
-**Solution:** Added a dedicated `POST /plan/{id}/map-config` endpoint that accepts a structured `{"changes": {...}}` payload and regenerates the map directly. The frontend's toggles now call this endpoint. The `/chat` endpoint still uses the LLM — but only for free-form natural-language messages, which is where the LLM actually adds value.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.9+
-- Docker (for the Xiaohongshu MCP scraper — optional)
-- An [OpenAI API key](https://platform.openai.com/api-keys) (optional — falls back to neutral verification)
-- A [Google Maps API key](https://developers.google.com/maps) (optional — falls back to 60+ city lookup table)
-
-### 1. Clone and install dependencies
-
 ```bash
-git clone https://github.com/your-username/click2GO.git
-cd click2GO
-pip install -r requirements.txt
+git clone https://github.com/jingjingzhang1/Click2GO-AgenticTravelPlanner.git
+cd Click2GO-AgenticTravelPlanner
+
+pip install -r requirements.txt      # or: make install
+cp .env.example .env                 # optional — fill in keys
+
+uvicorn backend.main:app --reload --port 8000   # or: make run
 ```
 
-### 2. Configure environment
+Open <http://localhost:8000>. The full pipeline runs end-to-end with **zero API
+keys** thanks to graceful fallbacks (mock scraper, neutral verification, keyless
+poster provider, fuzzy geocoding).
 
-```bash
-cp .env.example .env
-# Edit .env and fill in your keys:
-#   OPENAI_API_KEY=sk-...
-#   GOOGLE_MAPS_API_KEY=...   (optional)
-```
-
-### 3. Start the Xiaohongshu scraper (optional)
-
-```bash
-./start.sh      # start Docker container on localhost:18060
-./login.sh      # scan QR code with the Xiaohongshu app to authenticate
-```
-
-Skip this step to use the offline mock data fallback.
-
-### 4. Start the backend
-
-```bash
-uvicorn backend.main:app --reload --port 8000
-```
-
-### 5. Open the app
-
-Navigate to [http://localhost:8000](http://localhost:8000) in your browser.
+To generate posters with legible text, add `GEMINI_API_KEY` to `.env`.
 
 ---
 
-## Running Tests
+## Running with Docker + Postgres
 
 ```bash
-python3 -m pytest tests/ -v
+docker compose up --build
 ```
 
-**58 tests** covering:
-- API endpoints (root, health, planning CRUD, status polling)
-- Planning session lifecycle (create → status → result)
-- Route optimizer (K-Means clustering, nearest-neighbour sorting, even distribution)
-- Verification agent (OpenAI response parsing, fallback behavior, schema validation)
-- Social scraper (mock POIs, field completeness, post extraction, address parsing)
-- Itinerary exporter (PDF generation, map generation, GeoJSON fallback)
-- Postgres MCP safety (blocks INSERT, UPDATE, DELETE, DROP; allows SELECT)
-- POI cache (upsert, update, retrieval)
+This starts Postgres, waits for it to be healthy, applies Alembic migrations,
+and serves the API on <http://localhost:8000> with structured JSON logs. Stop and
+wipe volumes with `make docker-down`.
 
-Tests use an isolated SQLite database (tables recreated per test) and require no external services.
+---
+
+## Testing & CI
+
+```bash
+python3 -m pytest tests/ -v      # or: make test
+```
+
+**60 tests** cover the API endpoints, planning lifecycle, route optimizer,
+verification agent, scraper, exporter, read-only SQL safety, POI cache, and the
+MCP server/explorer factory. Tests run against an isolated SQLite database and
+require no external services.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR:
+
+- **lint** — `ruff check` + `ruff format --check`
+- **test** — pytest on Python 3.9 and 3.11 (SQLite)
+- **test-postgres** — spins up a Postgres service, runs `alembic upgrade head`,
+  and asserts all tables exist
+
+Local quality gates: `make lint`, `make typecheck`, and `pre-commit install`
+(config provided as `.pre-commit-config.yaml`).
 
 ---
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | No | OpenAI API key for POI verification + design interpretation. Falls back to neutral scores. |
-| `OPENAI_MODEL` | No | OpenAI model (default: `gpt-4o-mini`). |
-| `GOOGLE_MAPS_API_KEY` | No | Geocoding precision. Falls back to 60+ city lookup table with fuzzy matching. |
-| `REPLICATE_API_TOKEN` | No | Image generation (currently unused in UI). |
-| `MCP_SERVER_URL` | No | Xiaohongshu scraper URL (default: `http://localhost:18060/mcp`). |
-| `DATABASE_URL` | No | SQLAlchemy URL (default: `sqlite:///./click2go.db`). |
-| `SECRET_KEY` | No | App secret (change for production). |
-| `APP_ENV` | No | `development` or `production`. |
+Every variable is **optional**. Highlights (full list in `.env.example`):
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | SQLAlchemy URL. SQLite default; set a Postgres DSN to host your own DB. |
+| `GEMINI_API_KEY` / `GEMINI_IMAGE_MODEL` | Primary poster provider + model. |
+| `IMAGE_PROVIDER_PRIORITY` | Provider order, e.g. `gemini,replicate,pollinations`. |
+| `AUTO_GENERATE_POSTER` | Render the poster as the final pipeline step. |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | POI verification + design interpretation. |
+| `GOOGLE_MAPS_API_KEY` | Geocoding precision (falls back to 60+ city table). |
+| `LOG_FORMAT` / `LOG_LEVEL` | `json` or `console`; log verbosity. |
+| `CORS_ORIGINS` | Comma-separated allowed origins. |
 
 ---
 
-## Offline / Fallback Mode
+## Key Engineering Decisions
 
-All external dependencies degrade gracefully:
+Beyond the layering and provider design above, the project documents a series of
+real bugs solved during development:
 
-| Dependency | Fallback behavior |
-|------------|------------------|
-| **Xiaohongshu MCP scraper** | Returns curated mock POIs — 8 templates per persona with realistic names, descriptions, and scores |
-| **OpenAI API** | Verification returns `is_open: true`, `persona_score: 7.0` — all POIs included with "confirm status" note |
-| **Google Maps API** | Falls back to 60+ city coordinate lookup table with fuzzy substring + character overlap matching |
-| **ReportLab** | Exports plain text `.txt` instead of styled PDF |
-| **Folium** | Exports `.geojson` instead of interactive HTML map |
-
-The full pipeline runs end-to-end with **zero API keys configured**.
+1. **POI cache inconsistency with persona switching** — fixed by tagging each POI
+   with its *sourcing* `category` and adding a persona-coverage check to the cache.
+2. **Blank route map** — mock POIs now embed jittered city-center coordinates;
+   fuzzy geocoding resolves typos like "Vancuvour" → "Vancouver".
+3. **All POIs "Unverified"** — verification fallbacks now optimistically include
+   POIs with a "confirm status" note instead of showing everything unverified.
+4. **Static-file mount race** — `os.makedirs("outputs")` moved to module level
+   before `app.mount(...)`.
+5. **Design-Agent honesty** — the fallback now says "I'm not sure how to make that
+   change" instead of implying success.
+6. **Deterministic UI toggles routed through the LLM** — button clicks now hit a
+   dedicated `/map-config` endpoint; the LLM is reserved for free-form chat.
 
 ---
 
 ## Project Structure
 
 ```
-click2GO/
-├── frontend/
-│   └── index.html                  Single-page web UI (no build step)
+Click2GO-AgenticTravelPlanner/
 ├── backend/
-│   ├── main.py                     FastAPI app — serves UI, mounts routers
-│   ├── config.py                   pydantic-settings — reads .env
-│   ├── database.py                 SQLAlchemy engine + seed database strategy
-│   ├── models.py                   ORM models (6 tables)
-│   ├── schemas.py                  Pydantic request/response schemas
-│   ├── agents/
-│   │   ├── supervisor.py           LangGraph Multi-Agent Supervisor
-│   │   ├── knowledge_agent.py      Agent 1: scrape → verify → cache
-│   │   ├── verification_agent.py   OpenAI-powered POI verification
-│   │   ├── route_agent.py          Agent 2: cluster → fill gaps → write
-│   │   └── design_agent.py         Agent 3: maps, PDFs, map controls
-│   ├── services/
-│   │   └── route_optimizer.py      K-Means + nearest-neighbour algorithms
+│   ├── main.py                 FastAPI app — middleware, exception handlers, ops
+│   ├── config.py               pydantic-settings (typed, cached)
+│   ├── database.py             engine (SQLite/Postgres) + seed strategy
+│   ├── models.py               SQLAlchemy ORM (6 tables)
+│   ├── schemas.py              Pydantic DTOs
+│   ├── routers/                thin controllers (planning, chat, image, preferences)
+│   ├── services/               use-case layer + domain exceptions
+│   ├── repositories/           DAO layer (one repo per aggregate)
+│   ├── mappers/                ORM ↔ DTO ↔ agent-dict translation
+│   ├── observability/          structured logging · request middleware · metrics
+│   ├── agents/                 LangGraph supervisor + 3 agents
+│   ├── services/route_optimizer.py   K-Means + nearest-neighbour
 │   ├── tools/
-│   │   ├── social_scraper_tool.py  Xiaohongshu API wrapper + mock data
-│   │   ├── map_tool.py             Geocoding + Haversine distance
-│   │   ├── itinerary_exporter.py   ReportLab PDF + Folium map generation
-│   │   └── db_tools.py             Safe ORM write functions
-│   ├── mcp/
-│   │   └── postgres_mcp.py         Read-only SQL tool for Agent 2
-│   └── routers/
-│       ├── planning.py             POST /plan, GET /status, GET /result
-│       └── chat.py                 /plan/{id}/chat + /plan/{id}/map-config
-├── tests/
-│   └── test_click2go.py            58 tests
-├── seed_database.sqlite            Pre-scraped POI cache (Git-tracked)
-├── requirements.txt                Python dependencies
-├── .env.example                    Environment variable template
-└── README.md                       This file
+│   │   ├── image_generator.py        prompt builder + provider orchestration
+│   │   ├── image_providers/          gemini · replicate · pollinations
+│   │   ├── social_scraper_tool.py    Xiaohongshu wrapper + mock data
+│   │   ├── map_tool.py               geocoding + Haversine
+│   │   ├── itinerary_exporter.py     ReportLab PDF + Folium map
+│   │   └── db_tools.py               agent-facing façade over repositories
+│   └── mcp/                    read-only DB engine + real MCP server & client
+│       ├── postgres_mcp.py     read-only SQL engine (guardrails)
+│       ├── db_server.py        FastMCP server exposing the DB tools
+│       └── client.py           stdio MCP client (Route Optimizer dogfooding)
+├── migrations/                 Alembic env + versioned migrations
+├── tests/                      pytest suite (60 tests)
+├── Dockerfile · docker-compose.yml · docker/entrypoint.sh
+├── .github/workflows/ci.yml    lint · test · postgres migration check
+├── pyproject.toml · Makefile · requirements.txt · .env.example
+└── seed_database.sqlite        pre-scraped POI cache (Git-tracked)
 ```
 
 ---
 
 ## Acknowledgements
 
-The Xiaohongshu data layer is built on top of the MCP server by [**@xpzouying**](https://github.com/xpzouying/xiaohongshu-mcp).
-
----
+The Xiaohongshu data layer builds on the MCP server by
+[**@xpzouying**](https://github.com/xpzouying/xiaohongshu-mcp).
 
 ## Notes
 
-- This project is for research and personal use. Comply with Xiaohongshu's terms of service.
-- Do not make requests too frequently to avoid rate limiting or account suspension.
-- Scraped data should not be redistributed or used commercially.
+For research and personal use — comply with Xiaohongshu's terms of service, avoid
+frequent requests, and don't redistribute scraped data.

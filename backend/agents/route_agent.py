@@ -14,7 +14,7 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from ..mcp.postgres_mcp import PostgresMCPServer
+from ..mcp import get_db_explorer
 from ..services.route_optimizer import RouteOptimizer
 from ..tools.db_tools import save_session_pois
 from ..tools.map_tool import MapTool
@@ -34,7 +34,9 @@ class RouteOptimizerAgent:
     """
 
     def __init__(self):
-        self.mcp = PostgresMCPServer()
+        # In-process engine by default; a real MCP client when DB_MCP_ENABLED.
+        # Both expose find_nearby_pois(...) with the same signature.
+        self.mcp = get_db_explorer()
         self.optimizer = RouteOptimizer()
         self.map_tool = MapTool()
 
@@ -54,6 +56,10 @@ class RouteOptimizerAgent:
         included = state["verified_pois"]
         max_per_day = state.get("max_pois_per_day", 5)
 
+        hotel = state.get("hotel") or {}
+        anchor = ((hotel["lat"], hotel["lng"])
+                  if hotel.get("lat") is not None and hotel.get("lng") is not None else None)
+
         try:
             days = (
                 datetime.strptime(state["end_date"], "%Y-%m-%d")
@@ -68,7 +74,7 @@ class RouteOptimizerAgent:
 
         if geocoded:
             clustered = self.optimizer.cluster_pois_by_day(
-                geocoded, num_days=days, max_per_day=max_per_day
+                geocoded, num_days=days, max_per_day=max_per_day, anchor=anchor
             )
         else:
             clustered = self.optimizer.distribute_evenly(

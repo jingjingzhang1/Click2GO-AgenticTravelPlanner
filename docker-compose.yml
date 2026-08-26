@@ -1,0 +1,46 @@
+# ── Click2GO full-stack dev environment ──────────────────────────────────────
+# One command to run the API against a real Postgres instance:
+#
+#     docker compose up --build
+#
+# The API waits for Postgres, applies Alembic migrations, then serves on :8000.
+# Drop the `db` service and unset DATABASE_URL to fall back to zero-config SQLite.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: click2go
+      POSTGRES_PASSWORD: click2go
+      POSTGRES_DB: click2go
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U click2go -d click2go"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://click2go:click2go@db:5432/click2go
+      APP_ENV: production
+      LOG_FORMAT: json
+      # Provider keys (GEMINI_API_KEY, OPENAI_API_KEY…) are read from your
+      # local .env if present; the stack still boots without one.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist generated maps/PDFs/posters outside the container.
+      - ./outputs:/app/outputs
+
+volumes:
+  pgdata:

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        run: ruff check backend tests
+      - name: Ruff format check
+        run: ruff format --check backend tests
+
+  test:
+    name: Test (pytest • Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run test suite (SQLite)
+        run: python -m pytest tests/ -v
+
+  test-postgres:
+    name: Test against Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: click2go
+          POSTGRES_PASSWORD: click2go
+          POSTGRES_DB: click2go_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U click2go"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://click2go:click2go@localhost:5432/click2go_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Run migration smoke check
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect
+          import os
+          insp = inspect(create_engine(os.environ["DATABASE_URL"]))
+          tables = set(insp.get_table_names())
+          expected = {"user_profiles", "planning_sessions", "pois",
+                      "itinerary_days", "poi_cache", "chat_messages"}
+          missing = expected - tables
+          assert not missing, f"missing tables after migration: {missing}"
+          print("Postgres migration OK — all tables present.")
+          PY

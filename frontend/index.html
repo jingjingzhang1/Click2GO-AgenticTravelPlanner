@@ -57,8 +57,8 @@ main { max-width: 820px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
 .field { margin-bottom: 1.25rem; }
 label { display: block; font-size: .875rem; font-weight: 600;
         color: var(--text); margin-bottom: .4rem; }
-input[type="text"], input[type="date"], select {
-  width: 100%; padding: .65rem .9rem;
+input[type="text"], input[type="date"], input[type="number"], select {
+  width: 100%; box-sizing: border-box; padding: .65rem .9rem;
   border: 1.5px solid var(--border); border-radius: 8px;
   font-size: .95rem; outline: none; transition: border .15s;
   background: var(--white); color: var(--text);
@@ -254,11 +254,24 @@ input:focus, select:focus { border-color: var(--red); }
 
 <!-- ── Planning form ──────────────────────────────────────────────────── -->
 <div class="card" id="form-section">
-  <div class="card-title">Plan your trip</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+    <div class="card-title" style="margin:0">Plan your trip</div>
+    <button type="button" class="btn-secondary" style="padding:6px 12px;font-size:.82rem"
+            onclick="openTrips()">📁 My Trips</button>
+  </div>
 
   <div class="field">
     <label>Destination</label>
-    <input type="text" id="destination" placeholder="e.g. Tokyo, Paris, Singapore" />
+    <input type="text" id="destination" placeholder="e.g. New York, Tokyo, Paris" />
+  </div>
+
+  <div class="field">
+    <label>Hotel / where you're staying
+      <span style="font-size:.8rem;font-weight:400;color:var(--gray)">(optional — routes start from here)</span>
+    </label>
+    <input type="text" id="hotel-name" placeholder="Hotel name, e.g. Ace Hotel New York" />
+    <input type="text" id="hotel-address" placeholder="Hotel address (for accurate day-of directions)"
+           style="margin-top:.5rem" />
   </div>
 
   <div class="row-2">
@@ -267,20 +280,9 @@ input:focus, select:focus { border-color: var(--red); }
       <input type="date" id="start-date" onchange="updateEndDate()" />
     </div>
     <div class="field">
-      <label>Trip duration</label>
-      <select id="duration" onchange="updateEndDate()">
-        <option value="1">1 day</option>
-        <option value="2">2 days</option>
-        <option value="3" selected>3 days</option>
-        <option value="4">4 days</option>
-        <option value="5">5 days</option>
-        <option value="6">6 days</option>
-        <option value="7">1 week</option>
-        <option value="10">10 days</option>
-        <option value="14">2 weeks</option>
-        <option value="21">3 weeks</option>
-        <option value="30">1 month</option>
-      </select>
+      <label>Trip duration (days)</label>
+      <input type="number" id="duration" min="1" max="60" value="3"
+             inputmode="numeric" onchange="updateEndDate()" oninput="updateEndDate()" />
     </div>
   </div>
   <div class="field" style="margin-top:-.5rem">
@@ -327,12 +329,7 @@ input:focus, select:focus { border-color: var(--red); }
     </div>
     <div class="field">
       <label>Max stops / day</label>
-      <select id="max-pois">
-        <option value="3">3 stops</option>
-        <option value="4">4 stops</option>
-        <option value="5" selected>5 stops</option>
-        <option value="6">6 stops</option>
-      </select>
+      <input type="number" id="max-pois" min="1" max="20" value="5" inputmode="numeric" />
     </div>
   </div>
 
@@ -358,15 +355,10 @@ input:focus, select:focus { border-color: var(--red); }
   <p class="progress-msg" id="progress-msg">Initialising...</p>
 
   <div class="progress-steps">
-    <div class="step" id="step-scraping">
+    <div class="step" id="step-knowledge">
       <div class="dot">🔍</div>
       <span class="agent-label">Agent 1</span>
-      <span>Discover</span>
-    </div>
-    <div class="step" id="step-verifying">
-      <div class="dot">🤖</div>
-      <span class="agent-label">Agent 1</span>
-      <span>Verify</span>
+      <span>Knowledge</span>
     </div>
     <div class="step" id="step-routing">
       <div class="dot">📍</div>
@@ -438,6 +430,15 @@ input:focus, select:focus { border-color: var(--red); }
     <div class="actions-row" style="margin-top:1rem">
       <a id="map-fullscreen-link" href="#" target="_blank" class="btn-secondary">Open Full Screen</a>
       <a id="pdf-link" href="#" target="_blank" class="btn-secondary" style="display:none">Download PDF</a>
+      <button id="poster-btn" class="btn-secondary" onclick="generatePoster()">🎨 Generate Poster</button>
+    </div>
+
+    <!-- ── AI travel poster ─────────────────────────────────────────── -->
+    <div id="poster-panel" style="display:none;margin-top:1rem;text-align:center">
+      <div class="control-status" id="poster-status"></div>
+      <img id="poster-img" alt="AI travel poster"
+           style="display:none;max-width:100%;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.15);margin-top:.5rem" />
+      <div id="poster-meta" style="font-size:.8rem;color:var(--gray);margin-top:.4rem"></div>
     </div>
   </div>
 
@@ -448,12 +449,107 @@ input:focus, select:focus { border-color: var(--red); }
 </div>
 
 
+<!-- ── Journal modal ─────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="jrnl-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>＋ Memory · <b id="jrnl-title"></b></span>
+      <button class="modal-x" onclick="closeJournal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="jrnl-label">Note</label>
+      <textarea id="jrnl-note" class="jrnl-input" rows="3" placeholder="What happened here?"></textarea>
+
+      <label class="jrnl-label">Voice note (speech → text)</label>
+      <button type="button" id="jrnl-mic" class="jrnl-mic" onclick="toggleVoice()">🎙 Record voice note</button>
+      <textarea id="jrnl-transcript" class="jrnl-input" rows="2" placeholder="Transcript appears here (editable)…"></textarea>
+
+      <label class="jrnl-label">Photo</label>
+      <input type="file" id="jrnl-photo" accept="image/*" capture="environment" class="jrnl-input" />
+
+      <div class="jrnl-status" id="jrnl-status"></div>
+      <button class="btn-primary" onclick="saveMemory()">Save memory</button>
+
+      <div class="jrnl-saved-title">Memories here</div>
+      <div id="jrnl-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── My Trips modal ────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="trips-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>📁 My Trips</span>
+      <button class="modal-x" onclick="closeTrips()">✕</button>
+    </div>
+    <div class="modal-body" id="trips-body"></div>
+  </div>
+</div>
+
+<!-- ── Travel-log modal ──────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="log-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span id="log-title">Travel Log</span>
+      <button class="modal-x" onclick="closeLog()">✕</button>
+    </div>
+    <div class="modal-body" id="log-body"></div>
+  </div>
+</div>
+
+<style>
+.hotel-banner{background:#fff4ec;border:1px solid #ffd8bf;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.9rem;color:#7a3b12}
+.hotel-banner .hb-addr{color:#a86a44}
+.hotel-tag{background:#E8335D;color:#fff;font-size:.68rem;padding:2px 7px;border-radius:8px;margin-left:6px;white-space:nowrap}
+.poi-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.poi-act{font-size:.76rem;padding:5px 10px;border-radius:8px;border:1px solid #e2e2e2;background:#fafafa;color:#333;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:3px}
+.poi-act:hover{background:#f0f0f0}
+.act-reserve{background:#E8335D;color:#fff;border-color:#E8335D}
+.act-dir{background:#eef4ff;border-color:#cfe0ff;color:#1a4fb4}
+.act-mem{background:#eafaf0;border-color:#bfe8cf;color:#177a45}
+.act-mem.has-mem{background:#177a45;border-color:#177a45;color:#fff;font-weight:600}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:16px}
+.modal{background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff;font-size:.95rem}
+.modal-x{border:none;background:none;font-size:1.1rem;cursor:pointer;color:#888}
+.modal-body{padding:16px 18px}
+.jrnl-label{display:block;font-size:.78rem;font-weight:600;color:#666;margin:12px 0 5px}
+.jrnl-input{width:100%;box-sizing:border-box;border:1px solid #ddd;border-radius:9px;padding:9px 11px;font-size:.88rem;font-family:inherit}
+.jrnl-mic{border:1px solid #E8335D;color:#E8335D;background:#fff;border-radius:9px;padding:8px 12px;font-size:.85rem;cursor:pointer;margin-bottom:8px}
+.jrnl-mic.recording{background:#E8335D;color:#fff;animation:jpulse 1.2s infinite}
+@keyframes jpulse{0%,100%{opacity:1}50%{opacity:.6}}
+.jrnl-status{font-size:.8rem;color:#888;margin:10px 0}
+.jrnl-saved-title{font-weight:600;font-size:.85rem;margin:18px 0 8px;color:#444}
+.jrnl-entry{border:1px solid #eee;border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.jrnl-spot{font-weight:600;font-size:.85rem;margin-bottom:4px}
+.jrnl-text{font-size:.85rem;color:#444;margin:4px 0}
+.jrnl-voice{color:#177a45}
+.jrnl-photo{max-width:100%;border-radius:8px;margin-top:6px}
+.jrnl-empty{color:#aaa;font-size:.85rem}
+.log-stats{font-size:.85rem;color:#666;margin-bottom:12px}
+.modal audio{width:100%;margin-top:6px}
+.trip-card{border:1px solid #eee;border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;transition:background .12s,border-color .12s}
+.trip-card:hover{background:#fff4ec;border-color:#ffd8bf}
+.trip-info{flex:1;cursor:pointer;min-width:0}
+.trip-dest{font-weight:600;font-size:.95rem;color:#E8335D}
+.trip-meta{font-size:.8rem;color:#777;margin-top:3px}
+.trip-del{border:none;background:none;font-size:1.05rem;cursor:pointer;opacity:.55;padding:6px 8px;border-radius:8px;flex-shrink:0}
+.trip-del:hover{opacity:1;background:#ffe3e3}
+</style>
+
 </main>
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let pollTimer = null;
 let currentSessionId = null;
+let currentHotel = null;
+let currentDays = [];
+let journalSpot = null;      // { name, lat, lng } currently open in the modal
+let recognition = null;      // Web Speech API instance
+let mediaRecorder = null;    // MediaRecorder for the audio blob
+let recordedChunks = [];
 let mapConfig = {
   tile_layer: 'default',
   show_routes: true,
@@ -467,7 +563,8 @@ const fmtDisplay = d => d.toLocaleDateString('en', {weekday:'short', month:'shor
 
 function updateEndDate() {
   const startVal = document.getElementById('start-date').value;
-  const days     = parseInt(document.getElementById('duration').value);
+  let days = parseInt(document.getElementById('duration').value);
+  if (!days || days < 1) days = 1;
   if (!startVal) return;
   const end = new Date(startVal + 'T00:00:00');
   end.setDate(end.getDate() + days - 1);
@@ -485,9 +582,12 @@ function updateEndDate() {
 async function startPlanning() {
   const dest      = document.getElementById('destination').value.trim();
   const startDate = document.getElementById('start-date').value;
-  const duration  = parseInt(document.getElementById('duration').value);
+  let   duration  = parseInt(document.getElementById('duration').value);
   const budget    = document.getElementById('budget').value;
-  const maxPois   = parseInt(document.getElementById('max-pois').value);
+  let   maxPois   = parseInt(document.getElementById('max-pois').value);
+  if (!duration || duration < 1) duration = 1;
+  if (!maxPois  || maxPois  < 1) maxPois  = 1;
+  if (maxPois > 20) maxPois = 20;
   const allergyRaw = document.getElementById('allergies').value;
   const allergies = allergyRaw ? allergyRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
@@ -505,12 +605,19 @@ async function startPlanning() {
   if (!startDate)      { showError('Please pick a start date.');   return; }
   if (personas.length === 0) { showError('Please select at least one travel style.'); return; }
 
+  const hotelName    = document.getElementById('hotel-name').value.trim();
+  const hotelAddress = document.getElementById('hotel-address').value.trim();
+  const hotel = (hotelName || hotelAddress)
+    ? { name: hotelName || null, address: hotelAddress || hotelName || null }
+    : null;
+
   const payload = {
     destination:      dest,
     start_date:       startDate,
     end_date:         endDate,
     personas:         personas,
     constraints:      { allergies, budget: budget || null },
+    hotel:            hotel,
     max_pois_per_day: maxPois,
   };
 
@@ -541,16 +648,16 @@ async function startPlanning() {
 
 // ── Status polling ─────────────────────────────────────────────────────────
 const STATUS_STEPS = {
-  pending:   { pct: 5,  step: '',           msg: 'Initialising session...' },
-  scraping:  { pct: 25, step: 'scraping',   msg: 'Agent 1: Discovering POIs from Xiaohongshu...' },
-  verifying: { pct: 55, step: 'verifying',  msg: 'Agent 1: Running Claude AI verification...' },
-  routing:   { pct: 75, step: 'routing',    msg: 'Agent 2: Optimising routes with K-Means...' },
-  exporting: { pct: 90, step: 'exporting',  msg: 'Agent 3: Generating map and PDF...' },
+  pending:   { pct: 5,   step: '',          msg: 'Initialising session...' },
+  scraping:  { pct: 25,  step: 'knowledge', msg: 'Agent 1 · Knowledge Manager: curating places...' },
+  verifying: { pct: 55,  step: 'knowledge', msg: 'Agent 1 · Knowledge Manager: scoring spots with AI...' },
+  routing:   { pct: 75,  step: 'routing',   msg: 'Agent 2 · Route Optimizer: routing around your hotel...' },
+  exporting: { pct: 90,  step: 'exporting', msg: 'Agent 3 · Design Agent: generating your map...' },
   completed: { pct: 100, step: 'exporting', msg: 'Done! Fetching your itinerary...' },
   failed:    { pct: 0,   step: '',          msg: 'Something went wrong.' },
 };
 
-const STEP_ORDER = ['scraping','verifying','routing','exporting'];
+const STEP_ORDER = ['knowledge','routing','exporting'];
 
 function setProgress(status) {
   const info = STATUS_STEPS[status] || { pct: 0, step: '', msg: status };
@@ -608,9 +715,20 @@ function renderResult(data) {
   const body = document.getElementById('itinerary-body');
   body.innerHTML = '';
   const days = data.itinerary || [];
+  currentDays = days;
+  currentHotel = data.hotel || null;
+
+  if (currentHotel && (currentHotel.name || currentHotel.address)) {
+    const hb = document.createElement('div');
+    hb.className = 'hotel-banner';
+    hb.innerHTML = `🏨 <b>${currentHotel.name || 'Your hotel'}</b>` +
+      (currentHotel.address ? ` <span class="hb-addr">${currentHotel.address}</span>` : '') +
+      ` <span class="hotel-tag">routes start here</span>`;
+    body.appendChild(hb);
+  }
 
   if (days.length === 0) {
-    body.innerHTML = '<p style="color:var(--gray);text-align:center;padding:2rem">No POIs returned. Try a different destination or broaden your search.</p>';
+    body.innerHTML += '<p style="color:var(--gray);text-align:center;padding:2rem">No spots returned. Try a different destination or personas.</p>';
   }
 
   days.forEach(day => {
@@ -623,7 +741,8 @@ function renderResult(data) {
     if (day.date) header.textContent += `  ·  ${formatDate(day.date)}`;
     dayDiv.appendChild(header);
 
-    (day.pois || []).forEach((poi, idx) => {
+    const dayPois = day.pois || [];
+    dayPois.forEach((poi, idx) => {
       const card = document.createElement('div');
       card.className = 'poi-card';
 
@@ -648,11 +767,9 @@ function renderResult(data) {
 
       const meta = document.createElement('div');
       meta.className = 'poi-meta';
-
       if (poi.is_open === true)  meta.appendChild(badge('Open',    'badge-open'));
       if (poi.is_open === false) meta.appendChild(badge('Closed',  'badge-closed'));
-      if (poi.is_open === null)  meta.appendChild(badge('Unverified','badge-unknown'));
-
+      if (poi.needs_reservation) meta.appendChild(badge('Book ahead', 'badge-closed'));
       if (poi.persona_score != null) {
         const stars = String.fromCharCode(9733).repeat(Math.round(poi.persona_score / 2))
                     + String.fromCharCode(9734).repeat(5 - Math.round(poi.persona_score / 2));
@@ -667,6 +784,40 @@ function renderResult(data) {
         bdy.appendChild(note);
       }
 
+      // ── Day-of actions: reserve · directions · add memory ──────────
+      const actions = document.createElement('div');
+      actions.className = 'poi-actions';
+
+      if (poi.needs_reservation && poi.reservation_url) {
+        actions.appendChild(linkBtn('📅 Reserve', poi.reservation_url, 'act-reserve'));
+      } else if (poi.website) {
+        actions.appendChild(linkBtn('🌐 Website', poi.website, 'act-link'));
+      }
+
+      if (poi.lat && poi.lng) {
+        let from = null;
+        if (idx === 0 && currentHotel && currentHotel.lat != null) from = currentHotel;
+        else if (idx > 0) from = dayPois[idx - 1];
+        if (from && from.lat != null && from.lng != null) {
+          const url = `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}` +
+                      `&destination=${poi.lat},${poi.lng}&travelmode=transit`;
+          actions.appendChild(linkBtn(idx === 0 ? '🧭 From hotel' : '🧭 Directions', url, 'act-dir'));
+        } else {
+          const url = `https://www.google.com/maps/search/?api=1&query=${poi.lat},${poi.lng}`;
+          actions.appendChild(linkBtn('📍 Open in Maps', url, 'act-dir'));
+        }
+      }
+
+      const mem = document.createElement('button');
+      mem.type = 'button';
+      mem.className = 'poi-act act-mem';
+      mem.textContent = '＋ Memory';
+      mem.setAttribute('data-spot', poi.name || '');
+      mem.onclick = () => openJournal(poi.name, poi.lat, poi.lng);
+      actions.appendChild(mem);
+
+      bdy.appendChild(actions);
+
       card.appendChild(num);
       card.appendChild(bdy);
       dayDiv.appendChild(card);
@@ -674,6 +825,18 @@ function renderResult(data) {
 
     body.appendChild(dayDiv);
   });
+
+  // Itinerary-level actions (travel log)
+  const arow = document.getElementById('actions-row');
+  if (arow) {
+    arow.innerHTML = '';
+    const logBtn = document.createElement('button');
+    logBtn.type = 'button';
+    logBtn.className = 'btn-secondary';
+    logBtn.textContent = '📔 My Travel Log';
+    logBtn.onclick = openTravelLog;
+    arow.appendChild(logBtn);
+  }
 
   // Show map inline
   if (data.map_url) {
@@ -699,6 +862,31 @@ function renderResult(data) {
   document.getElementById('results-section').scrollIntoView({ behavior: 'smooth' });
   document.getElementById('progress-section').style.display = 'none';
   resetBtn();
+
+  // Mark which spots already have saved memories.
+  refreshMemoryMarkers();
+}
+
+// Update each spot's memory button to show a saved-memory badge + count.
+async function refreshMemoryMarkers() {
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/journal`);
+    const data = await res.json();
+    const counts = {};
+    (data.entries || []).forEach(e => { counts[e.spot_name] = (counts[e.spot_name] || 0) + 1; });
+    document.querySelectorAll('.poi-act.act-mem').forEach(btn => {
+      const spot = btn.getAttribute('data-spot');
+      const n = counts[spot] || 0;
+      if (n > 0) {
+        btn.textContent = `📔 View ${n} ${n === 1 ? 'memory' : 'memories'}`;
+        btn.classList.add('has-mem');
+      } else {
+        btn.textContent = '＋ Memory';
+        btn.classList.remove('has-mem');
+      }
+    });
+  } catch (e) {}
 }
 
 // ── Map Controls ──────────────────────────────────────────────────────────
@@ -748,6 +936,48 @@ function setControlStatus(text) {
   document.getElementById('control-status').textContent = text;
 }
 
+// ── AI travel poster ────────────────────────────────────────────────────────
+async function generatePoster() {
+  if (!currentSessionId) return;
+  const btn = document.getElementById('poster-btn');
+  const panel = document.getElementById('poster-panel');
+  const statusEl = document.getElementById('poster-status');
+  const img = document.getElementById('poster-img');
+  const meta = document.getElementById('poster-meta');
+
+  panel.style.display = 'block';
+  img.style.display = 'none';
+  meta.textContent = '';
+  const oldLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  statusEl.textContent = 'Rendering your travel poster (can take 10–30s)…';
+
+  try {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/generate-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: 'en' }),
+    });
+    const data = await res.json();
+    if (data.success && data.image_url) {
+      // cache-bust locally-served files so re-generates refresh
+      const bust = data.image_url.startsWith('/outputs') ? ('?t=' + Date.now()) : '';
+      img.src = data.image_url + bust;
+      img.style.display = 'block';
+      statusEl.textContent = 'Poster ready.';
+      meta.textContent = 'Provider: ' + (data.provider || 'unknown');
+    } else {
+      statusEl.textContent = 'Could not generate poster: ' + (data.error || 'unknown error');
+    }
+  } catch (e) {
+    statusEl.textContent = 'Request failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
+}
+
 function resetAndPlanAgain() {
   document.getElementById('progress-section').style.display = 'none';
   document.getElementById('results-section').style.display  = 'none';
@@ -762,6 +992,16 @@ function badge(text, cls) {
   s.className = `badge ${cls}`;
   s.textContent = text;
   return s;
+}
+
+function linkBtn(text, href, cls) {
+  const a = document.createElement('a');
+  a.className = `poi-act ${cls}`;
+  a.textContent = text;
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  return a;
 }
 
 function formatDate(dateStr) {
@@ -781,6 +1021,228 @@ function resetBtn() {
   b.disabled = false;
   b.textContent = 'Generate my itinerary';
 }
+
+// ── Travel journal ──────────────────────────────────────────────────────────
+function openJournal(spotName, lat, lng) {
+  if (!currentSessionId) return;
+  journalSpot = { name: spotName, lat, lng };
+  document.getElementById('jrnl-title').textContent = spotName;
+  document.getElementById('jrnl-note').value = '';
+  document.getElementById('jrnl-transcript').value = '';
+  document.getElementById('jrnl-photo').value = '';
+  setJrnlStatus('');
+  recordedChunks = [];
+  document.getElementById('jrnl-modal').style.display = 'flex';
+  loadMemories();
+}
+
+function closeJournal() {
+  stopVoice();
+  document.getElementById('jrnl-modal').style.display = 'none';
+}
+
+async function toggleVoice() {
+  if (recognition) { stopVoice(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { setJrnlStatus('Voice input is not supported in this browser (try Chrome).'); return; }
+
+  // Best-effort audio capture alongside the transcript.
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    recordedChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size) recordedChunks.push(e.data); };
+    mediaRecorder.start();
+  } catch (e) { /* audio is optional */ }
+
+  recognition = new SR();
+  recognition.lang = (navigator.language && navigator.language.startsWith('zh')) ? 'zh-CN' : 'en-US';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  const box = document.getElementById('jrnl-transcript');
+  let finalText = box.value ? box.value + ' ' : '';
+  recognition.onresult = (ev) => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) finalText += t + ' ';
+      else interim += t;
+    }
+    box.value = (finalText + interim).trim();
+  };
+  recognition.onerror = () => setJrnlStatus('Voice error — tap the mic to try again.');
+  recognition.start();
+  const btn = document.getElementById('jrnl-mic');
+  btn.textContent = '⏹ Stop';
+  btn.classList.add('recording');
+  setJrnlStatus('Listening… speak your note.');
+}
+
+function stopVoice() {
+  if (recognition) { try { recognition.stop(); } catch (e) {} recognition = null; }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') { try { mediaRecorder.stop(); } catch (e) {} }
+  const btn = document.getElementById('jrnl-mic');
+  if (btn) { btn.textContent = '🎙 Record voice note'; btn.classList.remove('recording'); }
+}
+
+async function saveMemory() {
+  if (!journalSpot || !currentSessionId) return;
+  stopVoice();
+  const note = document.getElementById('jrnl-note').value.trim();
+  const transcript = document.getElementById('jrnl-transcript').value.trim();
+  const photoInput = document.getElementById('jrnl-photo');
+  if (!note && !transcript && !(photoInput.files && photoInput.files[0]) && !recordedChunks.length) {
+    setJrnlStatus('Add a note, a voice memo, or a photo first.');
+    return;
+  }
+  setJrnlStatus('Saving…');
+  try {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/journal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        spot_name: journalSpot.name, lat: journalSpot.lat, lng: journalSpot.lng, note, transcript,
+      }),
+    });
+    if (!res.ok) throw new Error('save failed');
+    const entry = await res.json();
+
+    if (recordedChunks.length) {
+      await uploadMedia(entry.id, new Blob(recordedChunks, { type: 'audio/webm' }), 'voice.webm');
+      recordedChunks = [];
+    }
+    if (photoInput.files && photoInput.files[0]) {
+      await uploadMedia(entry.id, photoInput.files[0], photoInput.files[0].name);
+    }
+
+    setJrnlStatus('Saved ✓');
+    document.getElementById('jrnl-note').value = '';
+    document.getElementById('jrnl-transcript').value = '';
+    photoInput.value = '';
+    loadMemories();
+    refreshMemoryMarkers();   // update the spot's button badge live
+  } catch (e) { setJrnlStatus('Could not save: ' + e.message); }
+}
+
+async function uploadMedia(entryId, fileOrBlob, filename) {
+  const fd = new FormData();
+  fd.append('session_id', currentSessionId);
+  fd.append('file', fileOrBlob, filename);
+  await fetch(`/api/v1/journal/${entryId}/media`, { method: 'POST', body: fd });
+}
+
+async function loadMemories() {
+  try {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/journal`);
+    const data = await res.json();
+    const here = (data.entries || []).filter(e => !journalSpot || e.spot_name === journalSpot.name);
+    renderMemories(here, document.getElementById('jrnl-list'));
+  } catch (e) {}
+}
+
+function renderMemories(entries, container) {
+  container.innerHTML = '';
+  if (!entries.length) { container.innerHTML = '<p class="jrnl-empty">No memories yet.</p>'; return; }
+  entries.forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'jrnl-entry';
+    let html = `<div class="jrnl-spot">${escapeHtml(e.spot_name)}</div>`;
+    if (e.note) html += `<div class="jrnl-text">${escapeHtml(e.note)}</div>`;
+    if (e.transcript) html += `<div class="jrnl-text jrnl-voice">🎙 ${escapeHtml(e.transcript)}</div>`;
+    (e.media || []).forEach(m => {
+      html += (m.media_type === 'photo')
+        ? `<img class="jrnl-photo" src="${m.url}" alt="memory photo" />`
+        : `<audio controls src="${m.url}"></audio>`;
+    });
+    div.innerHTML = html;
+    container.appendChild(div);
+  });
+}
+
+async function openTravelLog() {
+  if (!currentSessionId) return;
+  const modal = document.getElementById('log-modal');
+  modal.style.display = 'flex';
+  const body = document.getElementById('log-body');
+  body.innerHTML = 'Loading…';
+  try {
+    const res = await fetch(`/api/v1/plan/${currentSessionId}/travel-log`);
+    const data = await res.json();
+    document.getElementById('log-title').textContent = `${data.destination || 'My'} Travel Log`;
+    body.innerHTML = `<div class="log-stats">${data.entry_count} memories · ${data.photo_count} photos · ${data.voice_count} voice notes</div><div id="log-entries"></div>`;
+    renderMemories(data.entries || [], document.getElementById('log-entries'));
+  } catch (e) { body.innerHTML = 'Could not load your travel log.'; }
+}
+
+function closeLog() { document.getElementById('log-modal').style.display = 'none'; }
+
+// ── My Trips (browse every saved trip) ──────────────────────────────────────
+async function openTrips() {
+  const modal = document.getElementById('trips-modal');
+  modal.style.display = 'flex';
+  const body = document.getElementById('trips-body');
+  body.innerHTML = 'Loading…';
+  try {
+    const res = await fetch('/api/v1/trips');
+    const data = await res.json();
+    const trips = (data.trips || []).filter(t => t.status === 'completed' || t.memory_count > 0);
+    if (!trips.length) { body.innerHTML = '<p class="jrnl-empty">No trips yet. Plan one to get started!</p>'; return; }
+    body.innerHTML = '';
+    trips.forEach(t => {
+      const div = document.createElement('div');
+      div.className = 'trip-card';
+      const dates = t.start_date ? `${t.start_date} → ${t.end_date || ''}` : '';
+
+      const info = document.createElement('div');
+      info.className = 'trip-info';
+      info.innerHTML =
+        `<div class="trip-dest">${escapeHtml(t.destination)}</div>` +
+        `<div class="trip-meta">${dates}` +
+        (t.hotel ? ` · 🏨 ${escapeHtml(t.hotel)}` : '') +
+        ` · 📔 ${t.memory_count} ${t.memory_count === 1 ? 'memory' : 'memories'}</div>`;
+      info.onclick = () => loadTrip(t.session_id);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'trip-del';
+      del.textContent = '🗑';
+      del.title = 'Delete this trip';
+      del.onclick = (e) => { e.stopPropagation(); deleteTrip(t.session_id, t.destination); };
+
+      div.appendChild(info);
+      div.appendChild(del);
+      body.appendChild(div);
+    });
+  } catch (e) { body.innerHTML = 'Could not load your trips.'; }
+}
+
+function closeTrips() { document.getElementById('trips-modal').style.display = 'none'; }
+
+async function deleteTrip(sessionId, name) {
+  if (!confirm(`Delete "${name}" and all its memories? This can't be undone.`)) return;
+  try {
+    const res = await fetch(`/api/v1/plan/${sessionId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('delete failed');
+    if (currentSessionId === sessionId) {
+      currentSessionId = null;
+      document.getElementById('results-section').style.display = 'none';
+      document.getElementById('map-section').style.display = 'none';
+    }
+    openTrips();   // refresh the list
+  } catch (e) { alert('Could not delete trip: ' + e.message); }
+}
+
+async function loadTrip(sessionId) {
+  closeTrips();
+  currentSessionId = sessionId;
+  try {
+    const res = await fetch(`/api/v1/plan/${sessionId}/result`);
+    if (!res.ok) throw new Error('Could not load that trip.');
+    const data = await res.json();
+    renderResult(data);
+  } catch (e) { showError(e.message); }
+}
+function setJrnlStatus(t) { document.getElementById('jrnl-status').textContent = t; }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
 </script>
 </body>

@@ -33,6 +33,7 @@ class SupervisorState(TypedDict):
     end_date: str
     personas: List[str]
     constraints: dict
+    hotel: dict
     max_pois_per_day: int
     language: str
 
@@ -176,6 +177,7 @@ class MultiAgentSupervisor:
             "end_date": request["end_date"],
             "personas": personas,
             "constraints": request.get("constraints", {}),
+            "hotel": request.get("hotel") or {},
             "max_pois_per_day": request.get("max_pois_per_day", 5),
             "language": request.get("language", "en"),
             "raw_pois": [],

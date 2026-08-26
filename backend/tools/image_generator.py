@@ -1,94 +1,143 @@
 """
-Image Generator Tool
-====================
-Generates a stylized travel poster using Replicate's FLUX Schnell model.
-Falls back to Pollinations AI (free, no auth) when Replicate is unavailable.
+Travel-poster prompt builder + provider orchestration
+=====================================================
+Builds a tight, art-directed prompt describing the finished trip, then
+delegates rendering to the provider chain (Gemini → OpenAI → Replicate →
+Pollinations).
+
+Design philosophy: image models garble large amounts of text, so the prompt
+asks for **one clean headline** (the destination) plus a short tagline, and
+folds the top POIs into the artwork as *visual scene elements* rather than
+printed labels. This yields a poster-grade result instead of a cluttered card
+full of misspelled captions.
 """
 from __future__ import annotations
 
 import logging
-import os
-from urllib.parse import quote
+from typing import List, Optional
 
-from ..config import settings
+from .image_providers import ImageResult, ordered_providers
 
 logger = logging.getLogger(__name__)
 
-OUTPUTS_DIR = "outputs"
-
-# ── Prompt Templates ─────────────────────────────────────────────────────────
-
-_EN_TEMPLATE = """\
-A vibrant cartoon-style travel poster for a trip to {destination}. \
-The poster has a clean pastel background with illustrated landmarks and local scenery from {destination}. \
-In the upper area, large hand-lettered title text reads "{destination} Travel Guide". \
-Below, a colourful illustrated itinerary layout shows {num_days} day{day_plural}, \
-with small cartoon icons for each activity. \
-Day labels are written as "{day_labels}". \
-The key highlights listed are: {poi_labels}. \
-At the bottom, decorative text reads "Planned by Click2GO · {personas} style · {num_days}-Day Adventure". \
-Art style: {art_style}.\
-"""
-
-_ZH_TEMPLATE = """\
-一张充满活力的卡通风格旅行海报，主题为{destination}之旅。\
-海报采用清新的粉彩背景，绘有{destination}当地标志性景点的插画场景。\
-上方用醒目的手写体标题文字写着「{destination}旅行指南」。\
-海报中央展示一个色彩丰富的{num_days}天行程版式，每项活动配有小巧的卡通图标。\
-各天标签分别标注为"{day_labels}"。\
-重点推荐地点包括：{poi_labels}。\
-底部装饰文字写着「由Click2GO规划 · {personas}风格 · {num_days}天探索之旅」。\
-美术风格：{art_style}。\
-"""
-
-# Persona-specific art styles
-_PERSONA_STYLES = {
-    "photography": "dramatic lighting, cinematic composition, golden-hour palette",
-    "chilling": "soft watercolour, warm tones, cozy and relaxed aesthetic",
-    "foodie": "rich saturated colours, food illustration style, appetizing warmth",
-    "exercise": "bold dynamic lines, energetic composition, nature-forward palette",
+# ── Persona-driven art direction ─────────────────────────────────────────────
+_PERSONA_ART = {
+    "photography": {
+        "style": "cinematic travel-poster art, dramatic golden-hour lighting, sweeping vistas",
+        "palette": "warm gold, deep teal and sunset amber",
+        "mood": "awe-inspiring and cinematic",
+        "tagline_en": "Chase the Light",
+        "tagline_zh": "追光而行",
+    },
+    "chilling": {
+        "style": "soft flat-vector illustration, cozy minimalist poster design",
+        "palette": "warm pastels, cream, dusty sage and blush",
+        "mood": "calm, cozy and unhurried",
+        "tagline_en": "Slow Down & Savor",
+        "tagline_zh": "慢享时光",
+    },
+    "foodie": {
+        "style": "vibrant appetizing illustration, playful modern poster design",
+        "palette": "rich reds, warm orange and golden cream",
+        "mood": "lively, warm and delicious",
+        "tagline_en": "Taste the City",
+        "tagline_zh": "品味之旅",
+    },
+    "exercise": {
+        "style": "bold dynamic vector art with energetic linework",
+        "palette": "fresh greens, crisp sky blue and sunlit yellow",
+        "mood": "active, fresh and adventurous",
+        "tagline_en": "Explore the Outdoors",
+        "tagline_zh": "户外探索",
+    },
 }
-_DEFAULT_STYLE = "flat vector illustration, bright colours, friendly cartoon aesthetic, no photorealism"
+_DEFAULT_ART = {
+    "style": "elegant flat-vector travel-poster illustration with a vintage feel",
+    "palette": "balanced, harmonious travel-poster colors",
+    "mood": "inviting and adventurous",
+    "tagline_en": "Plan Perfectly. Arrive Curious.",
+    "tagline_zh": "完美规划 · 好奇出发",
+}
+
+
+def _scene_pois(itinerary_data: dict) -> List[str]:
+    """Top few POI names, used as visual scene inspiration (not printed text)."""
+    names: List[str] = []
+    for day in itinerary_data.get("days", []):
+        names.extend(day.get("pois", []))
+    # De-dupe, keep order, cap at 3 so the artwork stays focused.
+    seen, out = set(), []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+        if len(out) == 3:
+            break
+    return out
+
+
+def _join_en(items: List[str]) -> str:
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
+
+def _day_lines(days: list, language: str) -> str:
+    """Enumerate each day and its numbered stops for the route-map art."""
+    lines = []
+    for i, d in enumerate(days):
+        stops = [s for s in d.get("pois", []) if s]
+        if not stops:
+            continue
+        n = d.get("day_number", i + 1)
+        if language == "zh":
+            numbered = "  ".join(f"{j + 1})「{s}」" for j, s in enumerate(stops))
+            lines.append(f"第{n}天（一条独立颜色的路线）：{numbered}")
+        else:
+            numbered = "  ".join(f'{j + 1}) "{s}"' for j, s in enumerate(stops))
+            lines.append(f"Day {n} (its own colored route): {numbered}")
+    return "\n".join(lines)
 
 
 def _build_prompt(language: str, itinerary_data: dict) -> str:
-    destination = itinerary_data.get("destination", "Unknown Destination")
-    personas = itinerary_data.get("personas", ["travel"])
+    destination = itinerary_data.get("destination", "a lovely destination")
     days = itinerary_data.get("days", [])
     num_days = len(days) if days else 1
-    day_plural = "s" if num_days > 1 else ""
-
-    # Pick art style from primary persona
-    primary_persona = personas[0] if personas else "chilling"
-    art_style = _PERSONA_STYLES.get(primary_persona, _DEFAULT_STYLE)
+    day_block = _day_lines(days, language)
 
     if language == "zh":
-        day_labels = "、".join(f"第{d['day_number']}天" for d in days) if days else "第1天"
-        persona_str = " & ".join(personas)
-    else:
-        day_labels = ", ".join(f"Day {d['day_number']}" for d in days) if days else "Day 1"
-        persona_str = " & ".join(p.capitalize() for p in personas)
+        return (
+            f"一张色彩鲜艳的手绘旅行路线图，小红书「手绘攻略」风格，画在浅色方格本（格子纸）背景上，"
+            f"主题是 {destination} {num_days} 天行程。"
+            f"顶部用夸张俏皮的手写大标题，把「{destination}」放在一个印章式方框里，并写上「{num_days}日游」。"
+            f"把每一天画成一条独立颜色的路线：用一种马克笔颜色的手绘曲线，按顺序把当天的站点连起来，"
+            f"每个站点标上圆圈数字（①②③…）和手绘小箭头表示游览方向；不同天用不同颜色区分。"
+            f"每个站点画一个可爱的彩色小涂鸦图标（地标 / 博物馆 / 大桥 / 公园 / 咖啡杯等），"
+            f"旁边用工整清晰的小字手写地点名称。行程如下（每天一种颜色的路线）：\n"
+            f"{day_block}\n"
+            f"页面四周点缀可爱的小涂鸦（小人、相机、咖啡、花朵、星星、地铁标志、动物等）。"
+            f"用彩色铅笔 / 马克笔上色，干净的白色方格背景，随性可爱的手绘风。"
+            f"所有文字简短、手写工整、拼写正确、清晰可读。无写实照片风，无水印。"
+        )
 
-    all_pois = []
-    for day in days:
-        all_pois.extend(day.get("pois", []))
-    top_pois = all_pois[:6]
-
-    if language == "zh":
-        poi_labels = "、".join(f"「{p}」" for p in top_pois) if top_pois else f"「{destination}热门景点」"
-        tmpl = _ZH_TEMPLATE
-    else:
-        poi_labels = ", ".join(f'"{p}"' for p in top_pois) if top_pois else f'"{destination} Top Attractions"'
-        tmpl = _EN_TEMPLATE
-
-    return tmpl.format(
-        destination=destination,
-        num_days=num_days,
-        day_plural=day_plural,
-        day_labels=day_labels,
-        poi_labels=poi_labels,
-        personas=persona_str,
-        art_style=art_style,
+    return (
+        f"A colorful hand-drawn travel route map in the cute Xiaohongshu illustrated-guide style, "
+        f"drawn on a light grid / graph-paper background. A {num_days}-day trip to {destination}. "
+        f'Big playful hand-lettered title at the top with "{destination}" inside a stamp-like box '
+        f'and "{num_days}-Day Trip". '
+        f"Draw each day as its OWN color-coded route: a looping hand-drawn marker line in a "
+        f"distinct color that connects that day's stops in order, with circled numbers (1, 2, 3 …) "
+        f"and little hand-drawn arrows showing the walking direction. Use a different color per day. "
+        f"For every stop, draw a small cute colored doodle icon of the place (landmark, museum, "
+        f"bridge, park, coffee cup, etc.) with its name hand-written neatly beside it. "
+        f"Itinerary (each day is a different colored route):\n"
+        f"{day_block}\n"
+        f"Scatter kawaii doodles around the page (little people, a camera, coffee, flowers, stars, "
+        f"a subway sign). Bright colored-pencil / marker coloring, clean white grid background, "
+        f"casual and charming hand-drawn aesthetic. Keep every label short, correctly spelled and "
+        f"clearly legible. No photorealism, no watermark."
     )
 
 
@@ -100,66 +149,48 @@ def generate_travel_poster(
     **_kwargs,
 ) -> dict:
     """
-    Generate a travel poster image.
+    Render a travel poster by walking the configured provider chain.
 
-    Tries Replicate FLUX Schnell first, falls back to Pollinations.
-
-    Returns:
-        {"success": bool, "image_url": str | None, "prompt_used": str, "error": str | None}
+    Returns a dict (backward-compatible keys preserved):
+        success, image_url, image_bytes, provider, mime_type, prompt_used, error
     """
     prompt = _build_prompt(language, itinerary_data)
-    logger.info("Image gen prompt (%s): %s", language, prompt[:120])
+    logger.info("image gen prompt (%s): %s", language, prompt[:160])
 
-    # Try Replicate first
-    if settings.replicate_api_token:
+    last_error: Optional[str] = None
+    for provider in ordered_providers():
+        if not provider.is_available():
+            logger.debug("skipping image provider %s (not configured)", provider.name)
+            continue
         try:
-            result = _generate_replicate(prompt, width, height)
-            if result:
-                return {
-                    "success": True,
-                    "image_url": result,
-                    "prompt_used": prompt,
-                    "error": None,
-                }
-        except Exception as e:
-            logger.warning("Replicate failed, falling back to Pollinations: %s", e)
+            result = provider.generate(prompt, width, height)
+            if result.success:
+                logger.info("image generated via %s", provider.name)
+                return _to_dict(result)
+            last_error = result.error
+            logger.warning("provider %s returned no image: %s", provider.name, result.error)
+        except Exception as exc:  # noqa: BLE001 — try the next provider
+            last_error = f"{provider.name}: {exc}"
+            logger.warning("image provider %s failed: %s", provider.name, exc)
 
-    # Fallback: Pollinations (free, no auth)
-    return _generate_pollinations(prompt, width, height)
-
-
-def _generate_replicate(prompt: str, width: int, height: int) -> str | None:
-    """Generate via Replicate FLUX Schnell."""
-    import replicate
-
-    output = replicate.run(
-        "black-forest-labs/flux-schnell",
-        input={
-            "prompt": prompt,
-            "go_fast": True,
-            "num_outputs": 1,
-            "aspect_ratio": "1:1",
-            "output_format": "webp",
-            "output_quality": 90,
-        },
-    )
-    # output is a list of FileOutput URLs
-    if output:
-        return str(output[0])
-    return None
-
-
-def _generate_pollinations(prompt: str, width: int, height: int) -> dict:
-    """Fallback: Pollinations AI (free, no key)."""
-    encoded = quote(prompt, safe="")
-    seed = abs(hash(prompt)) % 99991
-    image_url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&model=flux&nologo=true&seed={seed}"
-    )
     return {
-        "success": True,
-        "image_url": image_url,
+        "success": False,
+        "image_url": None,
+        "image_bytes": None,
+        "provider": None,
+        "mime_type": None,
         "prompt_used": prompt,
-        "error": None,
+        "error": last_error or "All image providers failed.",
+    }
+
+
+def _to_dict(result: ImageResult) -> dict:
+    return {
+        "success": result.success,
+        "image_url": result.image_url,
+        "image_bytes": result.image_bytes,
+        "provider": result.provider,
+        "mime_type": result.mime_type,
+        "prompt_used": result.prompt_used,
+        "error": result.error,
     }

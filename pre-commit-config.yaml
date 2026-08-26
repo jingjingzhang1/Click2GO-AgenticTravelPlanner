@@ -1,0 +1,19 @@
+# Rename this file to `.pre-commit-config.yaml`, then run `pre-commit install`.
+# (Shipped without the leading dot because the tooling that generated it
+#  cannot write dotfiles; the leading dot is what pre-commit expects.)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format

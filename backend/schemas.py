@@ -17,8 +17,16 @@ class UserConstraints(BaseModel):
     accessibility: Optional[str] = None
 
 
+class HotelInfo(BaseModel):
+    """Where the traveller is staying — the plan is anchored around this."""
+    name: Optional[str] = None
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
 class PlanningRequest(BaseModel):
-    destination: str = Field(..., description="Travel destination, e.g. 'Tokyo' or '东京'")
+    destination: str = Field(..., description="Travel destination, e.g. 'New York'")
     start_date: str = Field(..., description="Start date YYYY-MM-DD")
     end_date: str = Field(..., description="End date YYYY-MM-DD")
     personas: List[PersonaType] = Field(
@@ -26,7 +34,8 @@ class PlanningRequest(BaseModel):
         description="One or more traveler styles",
     )
     constraints: UserConstraints = Field(default_factory=UserConstraints)
-    max_pois_per_day: int = Field(5, ge=1, le=10, description="Max stops per day")
+    hotel: Optional[HotelInfo] = Field(default=None, description="Your hotel / base")
+    max_pois_per_day: int = Field(5, ge=1, le=20, description="Max stops per day")
     language: str = Field("en", description="Output language: 'en' or 'zh'")
 
     @field_validator("personas")
@@ -49,6 +58,10 @@ class POISchema(BaseModel):
     seasonal_match: Optional[bool] = None
     persona_score: Optional[float] = None
     agent_note: Optional[str] = None
+    website: Optional[str] = None
+    reservation_url: Optional[str] = None
+    needs_reservation: bool = False
+    transit_note: Optional[str] = None
     day_number: Optional[int] = None
     stop_order: Optional[int] = None
 
@@ -67,6 +80,7 @@ class PlanningSessionResponse(BaseModel):
     status: str
     message: str
     itinerary: Optional[List[ItineraryDaySchema]] = None
+    hotel: Optional[HotelInfo] = None
     pdf_url: Optional[str] = None
     map_url: Optional[str] = None
     stats: Optional[Dict[str, Any]] = None
@@ -96,3 +110,34 @@ class ChatMessageResponse(BaseModel):
     pdf_updated: bool = False
     map_url: Optional[str] = None
     pdf_url: Optional[str] = None
+
+
+# ── Journal schemas ──────────────────────────────────────────────────────────
+
+class JournalEntryRequest(BaseModel):
+    spot_name: str = Field(..., description="Which spot this memory is about")
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    note: Optional[str] = Field(None, description="Typed note")
+    transcript: Optional[str] = Field(None, description="Voice-note transcript")
+    rating: Optional[int] = Field(None, ge=1, le=5, description="Personal 1–5 rating")
+
+
+class JournalMediaSchema(BaseModel):
+    id: int
+    media_type: str
+    url: str
+    caption: Optional[str] = None
+
+
+class JournalEntrySchema(BaseModel):
+    id: int
+    session_id: str
+    spot_name: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    note: Optional[str] = None
+    transcript: Optional[str] = None
+    rating: Optional[int] = None
+    created_at: Optional[str] = None
+    media: List[JournalMediaSchema] = []

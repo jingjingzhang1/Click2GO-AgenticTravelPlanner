@@ -51,8 +51,12 @@ wheels/
 *.egg
 MANIFEST
 venv/
+.venv/
 env/
 ENV/
+
+# ===== User uploads (travel journal photos/audio) =====
+media/
 
 # ===== OS Files =====
 # macOS
@@ -71,6 +75,12 @@ $RECYCLE.BIN/
 
 # Linux
 *~
+
+# ===== Tooling caches =====
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # ===== IDE and Editors =====
 .vscode/

@@ -38,6 +38,13 @@ class UserProfile(Base):
     allergies = Column(JSON, default=list)
     budget = Column(String(50))
     language = Column(String(10), default="en")
+
+    # ── Hotel (trip is planned/anchored around where you're staying) ──────
+    hotel_name = Column(String(300), nullable=True)
+    hotel_address = Column(String(1000), nullable=True)
+    hotel_lat = Column(Float, nullable=True)
+    hotel_lng = Column(Float, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     sessions = relationship("PlanningSession", back_populates="user_profile")
@@ -60,6 +67,7 @@ class PlanningSession(Base):
     pois = relationship("POI", back_populates="session")
     itinerary_days = relationship("ItineraryDay", back_populates="session")
     chat_messages = relationship("ChatMessage", back_populates="session")
+    journal_entries = relationship("JournalEntry", back_populates="session")
 
 
 class POI(Base):
@@ -75,6 +83,12 @@ class POI(Base):
     likes = Column(Integer, default=0)
     source_url = Column(String(500), nullable=True)
     raw_content = Column(Text, nullable=True)
+
+    # Reservation / practical info (the "nanny-level guide" data)
+    website = Column(String(500), nullable=True)
+    reservation_url = Column(String(500), nullable=True)
+    needs_reservation = Column(Boolean, default=False)
+    transit_note = Column(String(500), nullable=True)
 
     # Verification
     is_verified = Column(Boolean, default=False)
@@ -107,8 +121,8 @@ class ItineraryDay(Base):
 
 class POICache(Base):
     """
-    Destination-level POI cache managed by the Knowledge Manager agent.
-    Stores verified POIs so repeat queries for popular cities are instant.
+    Destination-level place cache managed by the Knowledge Manager agent.
+    Stores curated / Places-sourced POIs so repeat queries are instant.
     """
     __tablename__ = "poi_cache"
 
@@ -127,6 +141,12 @@ class POICache(Base):
     source_url = Column(String(500), nullable=True)
     raw_content = Column(Text, nullable=True)
     likes = Column(Integer, default=0)
+
+    # Reservation / practical info
+    website = Column(String(500), nullable=True)
+    reservation_url = Column(String(500), nullable=True)
+    needs_reservation = Column(Boolean, default=False)
+
     scraped_at = Column(DateTime, server_default=func.now())
     verified_at = Column(DateTime, nullable=True)
 
@@ -143,3 +163,42 @@ class ChatMessage(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     session = relationship("PlanningSession", back_populates="chat_messages")
+
+
+class JournalEntry(Base):
+    """
+    A traveller's on-the-trip journal entry for a specific spot.
+    Holds a typed note and/or a voice-note transcript; photos and audio
+    files are attached as JournalMedia rows.
+    """
+    __tablename__ = "journal_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(36), ForeignKey("planning_sessions.id"), index=True)
+    spot_name = Column(String(500), nullable=False)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    note = Column(Text, nullable=True)              # typed note
+    transcript = Column(Text, nullable=True)        # voice-note transcript
+    rating = Column(Integer, nullable=True)         # optional personal 1–5
+    visited_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    session = relationship("PlanningSession", back_populates="journal_entries")
+    media = relationship("JournalMedia", back_populates="entry",
+                         cascade="all, delete-orphan")
+
+
+class JournalMedia(Base):
+    """A photo or audio file attached to a journal entry."""
+    __tablename__ = "journal_media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entry_id = Column(Integer, ForeignKey("journal_entries.id"), index=True)
+    media_type = Column(String(20), nullable=False)   # "photo" | "audio"
+    file_path = Column(String(1000), nullable=False)  # served under /media
+    caption = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    entry = relationship("JournalEntry", back_populates="media")

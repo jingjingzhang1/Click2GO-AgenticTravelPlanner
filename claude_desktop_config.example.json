@@ -1,0 +1,13 @@
+{
+  "// note": "Example Claude Desktop config. Merge the mcpServers block into your real claude_desktop_config.json (macOS: ~/Library/Application Support/Claude/claude_desktop_config.json). 'command' should point at the Python interpreter of this repo's environment, and 'cwd' at the repo root so relative imports resolve.",
+  "mcpServers": {
+    "click2go-db": {
+      "command": "python",
+      "args": ["-m", "backend.mcp.db_server"],
+      "cwd": "/absolute/path/to/Click2GO-AgenticTravelPlanner",
+      "env": {
+        "DATABASE_URL": "sqlite:///./click2go.db"
+      }
+    }
+  }
+}

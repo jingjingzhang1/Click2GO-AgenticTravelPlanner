@@ -1,7 +1,10 @@
 import json
+import logging
 from typing import List, Optional
 
 from ..config import settings
+
+logger = logging.getLogger("click2go.verification")
 
 
 class VerificationAgent:
@@ -28,7 +31,10 @@ class VerificationAgent:
     def _get_client(self):
         if self._client is None:
             from openai import OpenAI
-            self._client = OpenAI(api_key=settings.openai_api_key)
+            kwargs = {"api_key": settings.openai_api_key}
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url
+            self._client = OpenAI(**kwargs)
         return self._client
 
     def verify(
@@ -97,11 +103,15 @@ whether this location should appear in a personalised travel itinerary.
                 response_format={"type": "json_object"},
             )
             raw = completion.choices[0].message.content.strip()
-            return json.loads(raw)
+            data = json.loads(raw)
+            data["source"] = "llm"
+            return data
 
         except json.JSONDecodeError:
+            logger.warning("verification parse error for %s", poi_name)
             return self._fallback(poi_name, reason="parse_error")
         except Exception as e:
+            logger.warning("OpenAI verification failed for %s: %s", poi_name, e)
             return self._fallback(poi_name, reason=str(e))
 
     @staticmethod
@@ -124,4 +134,5 @@ whether this location should appear in a personalised travel itinerary.
                 f"Auto-included {poi_name} (AI verification unavailable). "
                 "Confirm status before visiting."
             ),
+            "source": "fallback",
         }

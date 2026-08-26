@@ -1,12 +1,22 @@
 """
-Read-Only Database Tool
-=======================
-Provides schema discovery and safe read-only SQL execution against
-the Click2GO SQLite database.
+Read-Only Database Engine (behind the MCP server)
+=================================================
+Provides schema discovery and safe read-only SQL execution against the
+Click2GO database (SQLite or Postgres).
 
-Agent 2 (Route Optimizer) uses this for intelligent exploration
-(e.g. finding filler POIs to bridge transit gaps), while all writes
-go through strict SQLAlchemy ORM functions in db_tools.py.
+This class is the *engine*: it holds the query logic and the read-only
+guardrails. It is exposed to agents/clients two ways:
+
+  1. In-process (default) — instantiated directly for speed and offline use.
+  2. Over MCP — wrapped by ``backend/mcp/db_server.py`` (a real FastMCP
+     server) so the Route Optimizer agent, Claude Desktop, or any MCP client
+     can call the same read-only tools over the protocol. See
+     ``backend/mcp/client.py`` and ``get_db_explorer()`` in this package.
+
+Agent 2 (Route Optimizer) uses this for intelligent exploration (e.g. finding
+filler POIs to bridge transit gaps), while all writes go through strict
+SQLAlchemy ORM functions in db_tools.py. The read-only guard here is the
+security boundary that makes it safe to let an LLM compose exploratory queries.
 """
 import logging
 import re

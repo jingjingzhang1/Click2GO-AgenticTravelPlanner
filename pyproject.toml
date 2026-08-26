@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "click2go"
+version = "3.0.0"
+description = "Autonomous multi-agent travel planner — layered FastAPI backend with LangGraph agents, Postgres/SQLite persistence, and Gemini poster generation."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "jingjing zhang" }]
+keywords = ["fastapi", "langgraph", "multi-agent", "travel", "postgres", "gemini"]
+
+[tool.setuptools]
+packages = ["backend"]
+
+# ── Ruff: linting + import sorting + formatting ──────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["migrations/versions", "outputs", "docker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "C4", "SIM"]
+ignore = [
+    "E501",   # line length handled by the formatter
+    "B008",   # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]        # re-exports
+"tests/*" = ["E402", "F401"]    # test-time sys.path juggling + import ordering
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+# ── mypy: pragmatic static typing ────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+files = ["backend"]
+exclude = "(migrations|outputs|tests)/"
+
+# ── pytest ───────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

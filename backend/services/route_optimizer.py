@@ -8,6 +8,11 @@ backtracking during the day.
 import math
 from typing import Dict, List
 
+# Business rule: cap how many of certain categories can land on a single day.
+# "coffee" (chilling) ≤ 3/day, "food" (foodie) ≤ 5/day; other categories are
+# only bounded by the user's max-stops-per-day setting.
+DAILY_CATEGORY_CAPS = {"chilling": 3, "foodie": 5}
+
 
 class RouteOptimizer:
     """
@@ -22,6 +27,7 @@ class RouteOptimizer:
         pois: List[Dict],
         num_days: int,
         max_per_day: int = 5,
+        anchor: "tuple | None" = None,
     ) -> List[List[Dict]]:
         """
         Cluster geocoded POIs into ``num_days`` daily zones.
@@ -35,6 +41,8 @@ class RouteOptimizer:
             List[List[POI]] – one inner list per day, each sorted
             by nearest-neighbour visiting order.
         """
+        from collections import defaultdict
+
         import numpy as np
         from sklearn.cluster import KMeans
 
@@ -47,19 +55,59 @@ class RouteOptimizer:
         coords = np.array([[p["lat"], p["lng"]] for p in geo])
 
         km = KMeans(n_clusters=k, random_state=42, n_init=10, max_iter=300)
-        labels = km.fit_predict(coords)
+        km.fit(coords)
+        centroids = km.cluster_centers_
 
-        clusters: List[List[Dict]] = [[] for _ in range(k)]
-        for poi, label in zip(geo, labels):
-            clusters[label].append(poi)
+        # ── Category-diversity constraint ────────────────────────────────
+        # Pure K-Means clusters by geography, which can pile every café into
+        # one day. We instead assign each POI to its *nearest* day-centroid,
+        # but cap how many of any one category (foodie/chilling/photography…)
+        # can land on a single day — so each day gets a balanced mix while
+        # still respecting geography as the primary signal.
+        cat_counts: Dict[str, int] = defaultdict(int)
+        for p in geo:
+            cat_counts[(p.get("category") or "other").lower()] += 1
+        # Explicit business caps for coffee/food; everything else just follows
+        # the overall max-stops-per-day (no tighter per-category limit).
+        cat_cap = {
+            c: min(DAILY_CATEGORY_CAPS.get(c, max_per_day), max_per_day)
+            for c in cat_counts
+        }
 
-        result = []
-        for cluster in clusters:
-            if cluster:
-                sorted_c = self._nearest_neighbour(cluster)
-                result.append(sorted_c[:max_per_day])
+        days: List[List[Dict]] = [[] for _ in range(k)]
+        cat_in_day = [defaultdict(int) for _ in range(k)]
 
-        return [d for d in result if d]
+        # Higher-scored POIs get first pick of their ideal day.
+        for poi in sorted(geo, key=lambda p: p.get("persona_score", 0) or 0, reverse=True):
+            cat = (poi.get("category") or "other").lower()
+            day_order = sorted(
+                range(k),
+                key=lambda di: (poi["lat"] - centroids[di][0]) ** 2
+                + (poi["lng"] - centroids[di][1]) ** 2,
+            )
+
+            placed = False
+            # Pass 1: nearest day that respects both the day cap and category cap.
+            for di in day_order:
+                if len(days[di]) < max_per_day and cat_in_day[di][cat] < cat_cap[cat]:
+                    days[di].append(poi)
+                    cat_in_day[di][cat] += 1
+                    placed = True
+                    break
+            # Pass 2: relax the category cap, keep the per-day cap.
+            if not placed:
+                for di in day_order:
+                    if len(days[di]) < max_per_day:
+                        days[di].append(poi)
+                        cat_in_day[di][cat] += 1
+                        placed = True
+                        break
+            # else: no room within max_per_day anywhere → drop (matches the
+            # original truncation behaviour).
+
+        # Order each day by nearest-neighbour visiting sequence, starting from
+        # the stop nearest the hotel (so each day naturally departs your base).
+        return [self._nearest_neighbour(d, anchor) for d in days if d]
 
     def distribute_evenly(
         self,
@@ -90,16 +138,24 @@ class RouteOptimizer:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _nearest_neighbour(self, pois: List[Dict]) -> List[Dict]:
+    def _nearest_neighbour(self, pois: List[Dict], anchor: "tuple | None" = None) -> List[Dict]:
         """
         Sort POIs with a greedy nearest-neighbour heuristic.
-        Starts from the northernmost POI (natural 'morning start').
+        Starts from the stop nearest the ``anchor`` (hotel) when given,
+        otherwise from the northernmost POI (natural 'morning start').
         """
         if len(pois) <= 1:
             return pois
 
-        remaining = sorted(pois, key=lambda p: -p.get("lat", 0))
-        ordered   = [remaining.pop(0)]
+        if anchor:
+            a_lat, a_lng = anchor
+            remaining = sorted(
+                pois,
+                key=lambda p: self._haversine(a_lat, a_lng, p.get("lat", 0), p.get("lng", 0)),
+            )
+        else:
+            remaining = sorted(pois, key=lambda p: -p.get("lat", 0))
+        ordered = [remaining.pop(0)]
 
         while remaining:
             cur     = ordered[-1]
