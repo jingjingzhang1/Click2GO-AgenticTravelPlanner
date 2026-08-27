@@ -25,10 +25,6 @@ langgraph>=0.1.0
 # its client. Only required to run the MCP server or set DB_MCP_ENABLED=true.
 mcp>=1.2.0
 
-# ── Image generation ─────────────────────────────────────────────
-google-genai>=0.3.0     # Gemini 2.5 Flash Image (primary poster provider)
-replicate>=0.25.0       # FLUX Schnell (fallback)
-
 # ── Maps ─────────────────────────────────────────────────────────
 googlemaps>=4.10.0
 

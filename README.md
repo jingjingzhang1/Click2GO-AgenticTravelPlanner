@@ -30,7 +30,6 @@ curiosity out of a trip.
 - [Layered Backend Architecture](#layered-backend-architecture)
 - [Multi-Agent Pipeline](#multi-agent-pipeline)
 - [The Travel Journal](#the-travel-journal)
-- [Poster Generation](#poster-generation)
 - [Database Design & Hosting Your Own](#database-design--hosting-your-own)
 - [Observability](#observability)
 - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
@@ -60,8 +59,6 @@ curiosity out of a trip.
   `/metrics` endpoint, Docker Compose, and CI.
 - **Bring-your-own database** — zero-config SQLite by default; point `DATABASE_URL`
   at Postgres and it runs pooled connections with schema managed by **Alembic**.
-- **AI travel poster** — a hand-drawn journal-style poster of the trip, rendered via
-  Gemini 2.5 Flash Image through OpenRouter (keyless fallback included).
 
 ---
 
@@ -99,14 +96,13 @@ curiosity out of a trip.
 │   Repository (DAO) layer  ── Session/POI/Profile/Cache/Chat/Journal│
 │        │ + Mappers (ORM ↔ DTO ↔ agent dicts)                      │
 │   SQLAlchemy ORM                                                  │
-└──────────┬───────────────────────────────────┬──────────────────┘
-           │ BackgroundTasks                    │
-┌──────────▼───────────────────────┐   ┌────────▼──────────────────┐
-│  LangGraph Multi-Agent Supervisor │   │  Image provider chain      │
-│  Agent1 Knowledge → Agent2 Route  │   │  OpenRouter(Gemini) →      │
-│         → Agent3 Design           │   │  Gemini → OpenAI →         │
-│                                   │   │  Replicate → Pollinations  │
-└──────────┬────────────────────────┘   └───────────────────────────┘
+└──────────┬───────────────────────────────────────────────────────┘
+           │ BackgroundTasks
+┌──────────▼───────────────────────┐
+│  LangGraph Multi-Agent Supervisor │
+│  Agent1 Knowledge → Agent2 Route  │
+│         → Agent3 Design           │
+└──────────┬────────────────────────┘
            │
 ┌──────────▼───────────────────────────────────────────────────────┐
 │         Database  ·  SQLite (default)  or  PostgreSQL (opt-in)     │
@@ -157,7 +153,7 @@ nearest-neighbour starting from the hotel.
 
 **Agent 3 — Design Agent (`design_agent.py`):** branded PDF + interactive Folium map
 (category-colored markers, day routes, transit/distance labels), plus deterministic
-map toggles and an optional Gemini poster.
+map toggles.
 
 ```
 START → knowledge_manager → check_sufficiency ─┬─ ok ────→ route_optimizer → design_agent → END
@@ -184,24 +180,6 @@ The feature that makes Click2GO a companion, not just a planner:
   (counts + every entry, image, and playable recording).
 - **My Trips** — `GET /trips` lists every saved trip with a memory count; reopen or
   **delete** any of them (cascade-deletes its data + files).
-
----
-
-## Poster Generation
-
-A stylized, hand-drawn journal-style poster of the trip, abstracted behind a
-**provider-strategy chain** in `backend/tools/image_providers/`:
-
-| Provider | Model | Role |
-|----------|-------|------|
-| **OpenRouter** | `google/gemini-2.5-flash-image` (Nano Banana) | primary — best at legible in-image text |
-| **Gemini** (direct) | `gemini-2.5-flash-image` | if you use a Google key directly |
-| **OpenAI** | `gpt-image-1` | alternative |
-| **Replicate** | FLUX Schnell | fallback |
-| **Pollinations** | FLUX (keyless) | last-resort fallback |
-
-Providers are tried in the order set by `IMAGE_PROVIDER_PRIORITY`; missing credentials
-are skipped. The prompt lays out each day and its stops as a grid-paper route-map.
 
 ---
 
@@ -255,8 +233,7 @@ python -m backend.mcp.db_server        # run over stdio
 LLM via **OpenRouter** · scikit-learn KMeans + NumPy · Folium · ReportLab ·
 SQLAlchemy 2.0 · Alembic · pydantic-settings.
 
-**Data:** curated datasets + optional **Google Places**. **Image:** Gemini 2.5 Flash
-Image (via OpenRouter) → OpenAI → Replicate → Pollinations. **Journal voice:** Web
+**Data:** curated datasets + optional **Google Places**. **Journal voice:** Web
 Speech API (browser). **DB:** PostgreSQL (psycopg 3) or SQLite. **Infra:** Docker
 Compose · GitHub Actions CI · ruff/mypy. **Frontend:** vanilla HTML/CSS/JS, single file.
 
@@ -273,7 +250,6 @@ Prefixed with `/api/v1`; Swagger at `/docs`.
 | `GET` | `/plan/{id}/result` | Itinerary + hotel + map/PDF URLs. |
 | `DELETE` | `/plan/{id}` | Delete a trip and all its data + files. |
 | `GET` | `/trips` | List every saved trip (with memory counts). |
-| `POST` | `/plan/{id}/generate-image` | Render the travel poster. |
 | `POST` | `/plan/{id}/chat` · `GET` | Design-Agent chat (LLM) + history. |
 | `POST` | `/plan/{id}/map-config` | Deterministic map toggles (no LLM). |
 | `POST` | `/plan/{id}/journal` · `GET` | Add / list journal entries. |
@@ -298,9 +274,9 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
 Open <http://127.0.0.1:8000>. It runs end-to-end with **zero keys** (curated places,
-neutral scoring, keyless poster fallback, offline geocoding). Add an OpenRouter key for
-real AI scoring + the Gemini poster; add a Google Maps key for live Places/geocoding.
-Use **Chrome** for the in-browser voice-to-text.
+neutral scoring, offline geocoding). Add an OpenAI/OpenRouter key for real AI scoring;
+add a Google Maps key for live Places/geocoding. Use **Chrome** for the in-browser
+voice-to-text.
 
 ---
 
@@ -325,8 +301,7 @@ Every variable is optional (see `.env.example`). Highlights:
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | LLM via OpenRouter (or OpenAI). |
-| `OPENROUTER_IMAGE_MODEL` / `IMAGE_PROVIDER_PRIORITY` | Poster model + provider order. |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | LLM via OpenAI or an OpenRouter gateway. |
 | `GOOGLE_MAPS_API_KEY` | Google Places + precise geocoding (optional). |
 | `DATABASE_URL` | SQLite default; Postgres DSN to host your own DB. |
 | `DB_MCP_ENABLED` | Route Optimizer reaches the DB over MCP instead of in-process. |
@@ -352,8 +327,6 @@ Click2GO-AgenticTravelPlanner/
 │   ├── agents/                 LangGraph supervisor + 3 agents
 │   ├── tools/
 │   │   ├── place_provider.py         curated + Google Places (replaces scraping)
-│   │   ├── image_generator.py        prompt builder + provider chain
-│   │   ├── image_providers/          openrouter · gemini · openai · replicate · pollinations
 │   │   ├── map_tool.py               geocoding + Haversine + directions URLs
 │   │   ├── itinerary_exporter.py     ReportLab PDF + Folium map
 │   │   └── db_tools.py               agent-facing façade over repositories

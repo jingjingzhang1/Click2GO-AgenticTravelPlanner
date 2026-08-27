@@ -22,20 +22,6 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     google_maps_api_key: str = ""
 
-    # ── Image generation ────────────────────────────────────────────────
-    # Providers are tried in the order given by ``image_provider_priority``.
-    # Any provider whose credentials are missing is skipped automatically.
-    gemini_api_key: str = ""
-    gemini_image_model: str = "gemini-2.5-flash-image"
-    openai_image_model: str = "gpt-image-1"
-    # OpenRouter image-capable model (reached via openai_base_url + openai_api_key).
-    openrouter_image_model: str = "google/gemini-2.5-flash-image-preview"
-    replicate_api_token: str = ""
-    # Comma-separated list, highest priority first.
-    image_provider_priority: str = "openrouter,gemini,openai,replicate,pollinations"
-    # Generate the poster automatically as the final pipeline step.
-    auto_generate_poster: bool = False
-
     # ── Database ─────────────────────────────────────────────────────────
     # SQLite is the zero-config default. Point this at a Postgres instance
     # to host your own planning database, e.g.
@@ -85,10 +71,6 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-
-    @property
-    def image_providers(self) -> List[str]:
-        return [p.strip().lower() for p in self.image_provider_priority.split(",") if p.strip()]
 
     @property
     def db_mcp_args_list(self) -> List[str]:

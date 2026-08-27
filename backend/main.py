@@ -23,7 +23,7 @@ from .observability import (
     get_logger,
     render_prometheus,
 )
-from .routers import chat, image, journal, planning, preferences
+from .routers import chat, journal, planning, preferences
 from .services.exceptions import ConflictError, InProgressError, NotFoundError
 
 configure_logging()
@@ -95,7 +95,6 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(planning.router, prefix="/api/v1", tags=["Planning"])
 app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
-app.include_router(image.router, prefix="/api/v1", tags=["Image"])
 app.include_router(preferences.router, prefix="/api/v1", tags=["Preferences"])
 app.include_router(journal.router, prefix="/api/v1", tags=["Journal"])
 

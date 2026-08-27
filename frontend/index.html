@@ -430,15 +430,6 @@ input:focus, select:focus { border-color: var(--red); }
     <div class="actions-row" style="margin-top:1rem">
       <a id="map-fullscreen-link" href="#" target="_blank" class="btn-secondary">Open Full Screen</a>
       <a id="pdf-link" href="#" target="_blank" class="btn-secondary" style="display:none">Download PDF</a>
-      <button id="poster-btn" class="btn-secondary" onclick="generatePoster()">🎨 Generate Poster</button>
-    </div>
-
-    <!-- ── AI travel poster ─────────────────────────────────────────── -->
-    <div id="poster-panel" style="display:none;margin-top:1rem;text-align:center">
-      <div class="control-status" id="poster-status"></div>
-      <img id="poster-img" alt="AI travel poster"
-           style="display:none;max-width:100%;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.15);margin-top:.5rem" />
-      <div id="poster-meta" style="font-size:.8rem;color:var(--gray);margin-top:.4rem"></div>
     </div>
   </div>
 
@@ -934,48 +925,6 @@ function toggleDistances() {
 
 function setControlStatus(text) {
   document.getElementById('control-status').textContent = text;
-}
-
-// ── AI travel poster ────────────────────────────────────────────────────────
-async function generatePoster() {
-  if (!currentSessionId) return;
-  const btn = document.getElementById('poster-btn');
-  const panel = document.getElementById('poster-panel');
-  const statusEl = document.getElementById('poster-status');
-  const img = document.getElementById('poster-img');
-  const meta = document.getElementById('poster-meta');
-
-  panel.style.display = 'block';
-  img.style.display = 'none';
-  meta.textContent = '';
-  const oldLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
-  statusEl.textContent = 'Rendering your travel poster (can take 10–30s)…';
-
-  try {
-    const res = await fetch(`/api/v1/plan/${currentSessionId}/generate-image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: 'en' }),
-    });
-    const data = await res.json();
-    if (data.success && data.image_url) {
-      // cache-bust locally-served files so re-generates refresh
-      const bust = data.image_url.startsWith('/outputs') ? ('?t=' + Date.now()) : '';
-      img.src = data.image_url + bust;
-      img.style.display = 'block';
-      statusEl.textContent = 'Poster ready.';
-      meta.textContent = 'Provider: ' + (data.provider || 'unknown');
-    } else {
-      statusEl.textContent = 'Could not generate poster: ' + (data.error || 'unknown error');
-    }
-  } catch (e) {
-    statusEl.textContent = 'Request failed: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = oldLabel;
-  }
 }
 
 function resetAndPlanAgain() {

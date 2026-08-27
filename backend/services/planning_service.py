@@ -243,9 +243,6 @@ class PlanningService:
             session.completed_at = datetime.utcnow()
             db.commit()
 
-            if final == SessionStatus.COMPLETED and settings.auto_generate_poster:
-                PlanningService._safe_generate_poster(db, session_id, request_data)
-
             logger.info("pipeline finished", extra={"session_id": session_id, "status": final})
 
         except Exception as exc:  # noqa: BLE001 — worker must record failure, not crash
@@ -258,12 +255,3 @@ class PlanningService:
             logger.exception("pipeline crashed", extra={"session_id": session_id})
         finally:
             db.close()
-
-    @staticmethod
-    def _safe_generate_poster(db: Session, session_id: str, request_data: dict) -> None:
-        """Best-effort final step: render the Gemini travel poster."""
-        try:
-            from .image_service import ImageService
-            ImageService(db).generate_poster(session_id, request_data.get("language", "en"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("auto poster generation skipped: %s", exc)
